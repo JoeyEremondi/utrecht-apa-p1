@@ -1,5 +1,5 @@
 {-# LANGUAGE StandaloneDeriving, DeriveFunctor #-}
-module Traversals where
+module Optimize.Traversals where
 
 import  AST.Expression.General
 import AST.Annotation
@@ -9,12 +9,6 @@ import qualified AST.Expression.Canonical as Canon
 import qualified AST.Variable as Var
 import qualified AST.Type as Type
 
---Annotated expression types
-type AExpr ann = Expr ann (ADef ann) Var.Canonical
-type AExpr' ann = Expr' ann (ADef ann) Var.Canonical
-
-data ADef ann = Definition Pattern.CanonicalPattern (AExpr ann) (Maybe CanonicalType)
-    deriving (Show)
 
 tformE ::  (a -> aa, d -> dd, v -> vv, Expr aa dd vv -> Expr aa dd vv)
        -> Expr a d v
@@ -50,6 +44,8 @@ tformEE _ (GLShader s1 s2 ty) = GLShader s1 s2 ty
 tformP :: (v -> vv) -> Pattern.Pattern v -> Pattern.Pattern vv
 tformP  = fmap
 
+--Since we only have 1 type parameter, we can cheat and
+--derive the traversals for Patterns and types
 deriving instance Functor Pattern.Pattern
 deriving instance Functor Type.Type
 
@@ -60,31 +56,26 @@ tformT = fmap
 --mapD :: (a -> b) -> ADef a -> ADef b
 --mapD f (Definition pat (A ann e) ty) = Definition pat (A (f ann) (mapEE f e)) ty
 
-foldE :: (AExpr' a -> [b] -> b) -> AExpr a -> b
-foldE f (A ann e) = (foldEE f e)
+foldE :: (d -> [Expr a d v]) -> (Expr' a d v -> [b] -> b) -> Expr a d v -> b
+foldE fd f (A ann e) = (foldEE fd f e)
 
-foldEE :: (AExpr' a -> [b] -> b) -> AExpr' a -> b
-foldEE f rootE@(Range e1 e2) = f rootE [foldE f e1, foldE f e2]
-foldEE f rootE@(ExplicitList exprs) = f rootE $ map (foldE f) exprs
-foldEE f rootE@(Binop op e1 e2) = f rootE [foldE f e1, foldE f e2]
-foldEE f rootE@(Lambda pat body) = f rootE [foldE f body]
-foldEE f rootE@(App e1 e2) = f rootE [foldE f e1, foldE f e2]
-foldEE f rootE@(MultiIf exprs) = f rootE $ concatMap (\(e1, e2) -> [foldE f e1, foldE f e2]) exprs
-foldEE f rootE@(Let defs body) = f rootE $ (map (foldEInD f) defs) ++ [foldE f body]
-foldEE f rootE@(Case e1 cases) = f rootE $ [foldE f e1] ++ (map ( (foldE f) . snd ) cases)
-foldEE f rootE@(Data ctor exprs) = f rootE  $ map (foldE f) exprs
+foldEE :: (d -> [Expr a d v]) -> (Expr' a d v -> [b] -> b) -> Expr' a d v -> b
+foldEE fd f rootE@(Range e1 e2) = f rootE [foldE fd f e1, foldE fd f e2]
+foldEE fd f rootE@(ExplicitList exprs) = f rootE $ map (foldE fd f) exprs
+foldEE fd f rootE@(Binop op e1 e2) = f rootE [foldE fd f e1, foldE fd f e2]
+foldEE fd f rootE@(Lambda pat body) = f rootE [foldE fd f body]
+foldEE fd f rootE@(App e1 e2) = f rootE [foldE fd f e1, foldE fd f e2]
+foldEE fd f rootE@(MultiIf exprs) = f rootE $ concatMap (\(e1, e2) -> [foldE fd f e1, foldE fd f e2]) exprs
+foldEE fd f rootE@(Let defs body) = f rootE $ (map (foldE fd f) (concatMap fd defs)) ++ [foldE fd f body]
+foldEE fd f rootE@(Case e1 cases) = f rootE $ [foldE fd f e1] ++ (map ( (foldE fd f) . snd ) cases)
+foldEE fd f rootE@(Data ctor exprs) = f rootE  $ map (foldE fd f) exprs
 --record cases
-foldEE f rootE@(Access e1 field) = f rootE [foldE f e1]
-foldEE f rootE@(Remove e1 field) = f rootE [foldE f e1] 
-foldEE f rootE@(Insert e1 field e2) = f rootE $ [foldE f e1, foldE f e2]
-foldEE f rootE@(Modify e1 mods) = f rootE $ [foldE f e1] ++ map ((foldE f) . snd) mods
-foldEE f rootE@(Record vars) = f rootE $ map ((foldE f) . snd) vars
-foldEE f rootE@(PortOut s t e) = f rootE [foldE f e]
+foldEE fd f rootE@(Access e1 field) = f rootE [foldE fd f e1]
+foldEE fd f rootE@(Remove e1 field) = f rootE [foldE fd f e1] 
+foldEE fd f rootE@(Insert e1 field e2) = f rootE $ [foldE fd f e1, foldE fd f e2]
+foldEE fd f rootE@(Modify e1 mods) = f rootE $ [foldE fd f e1] ++ map ((foldE fd f) . snd) mods
+foldEE fd f rootE@(Record vars) = f rootE $ map ((foldE fd f) . snd) vars
+foldEE fd f rootE@(PortOut s t e) = f rootE [foldE fd f e]
 --Leaf cases: fold with empty child list
-foldEE f e = f e []
-
---Fold over expressions within definitions
-foldEInD :: (AExpr' a -> [b] -> b) -> ADef a -> b
-foldEInD f (Definition pat (A ann e) ty) = foldEE f e 
-
+foldEE fd f e = f e []
 

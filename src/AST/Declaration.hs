@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE FlexibleInstances #-}
 module AST.Declaration where
 
 import Data.Binary
@@ -18,10 +19,11 @@ data Declaration' port def var
     | TypeAlias String [String] (T.Type var)
     | Port port
     | Fixity Assoc Int String
+  deriving (Show)
 
 
 data Assoc = L | N | R
-    deriving (Eq)
+    deriving (Eq, Show)
 
 
 data RawPort
@@ -32,7 +34,7 @@ data RawPort
 data Port expr var
     = Out String expr (T.Type var)
     | In String (T.Type var)
-
+  deriving (Show)
 
 type SourceDecl    = Declaration' RawPort Source.Def Var.Raw
 type ValidDecl     = Declaration' (Port Valid.Expr Var.Raw) Valid.Def Var.Raw
@@ -142,3 +144,6 @@ instance (Pretty expr, Pretty var, Var.ToString var) => Pretty (Port expr var) w
 prettyPort :: (Pretty a) => String -> String -> a -> Doc
 prettyPort name op e =
     P.text "port" <+> P.text name <+> P.text op <+> pretty e
+    
+instance Pretty ([AST.Declaration.ValidDecl]) where
+  pretty decls = sep $ punctuate (text " ") $ map pretty decls

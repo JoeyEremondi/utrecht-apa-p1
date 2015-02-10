@@ -2,7 +2,7 @@
 --Utrecht University, APA 2015
 --Project one: dataflow analysis
 
-module MonotoneFramework where
+module Optimize.MonotoneFramework where
 
 import qualified Data.Set as Set
 
@@ -27,13 +27,7 @@ class (Ord block) => MonotoneFramework block where
     makePairs :: CFG block -> CFG block
     extremalBlocks :: Set.Set block
 
---TODO this is infinite recursion!!!
-analysis :: (CompleteLattice lat, MonotoneFramework block) => CFG block -> block -> lat
-analysis controlFlow label = helper labelPairs
-  if Set.member label extremalBlocks
-  then iota
-  else joinAll incomingBlocks
-  where
-    recFun = analysis controlFlow
-    labelPairs = makePairs controlFlow --TODO avoid recomputing at each stage?
-    incomingBlocks = Set.map recFun $ incoming labelPairs label
+
+
+
+

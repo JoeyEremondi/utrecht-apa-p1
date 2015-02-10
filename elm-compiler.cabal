@@ -102,6 +102,8 @@ Library
         Type.State,
         Type.Type,
         Type.Unify,
+        Optimize.MonotoneFramework,
+        Optimize.Traversals,
         Paths_elm_compiler
 
     Build-depends:

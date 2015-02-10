@@ -44,7 +44,7 @@ data Module exports body = Module
     , exports :: exports
     , imports :: [(Name, ImportMethod)]
     , body    :: body
-    }
+    } deriving (Show)
 
 data CanonicalBody = CanonicalBody
     { program   :: Canonical.Expr
@@ -124,6 +124,7 @@ instance Binary Interface where
 data ImportMethod
     = As !String
     | Open !(Var.Listing Var.Value)
+  deriving (Show)
 
 open :: ImportMethod
 open = Open (Var.openListing)
