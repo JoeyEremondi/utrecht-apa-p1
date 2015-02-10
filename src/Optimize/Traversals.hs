@@ -1,3 +1,4 @@
+{-# LANGUAGE StandaloneDeriving, DeriveFunctor #-}
 module Traversals where
 
 import  AST.Expression.General
@@ -23,8 +24,8 @@ tformE f@(fa, _fd, _fv, fe) (A ann e) = fe $ A (fa ann) (tformEE f e)
 tformEE :: (a -> aa, d -> dd, v -> vv, Expr aa dd vv -> Expr aa dd vv)
         -> Expr' a d v
         -> Expr' aa dd vv
-tformEE f (Literal l) = Literal l
-tformEE f@(_,_,fv,_) (Var name) = Var $ fv name
+tformEE _ (Literal l) = Literal l
+tformEE (_,_,fv,_) (Var name) = Var $ fv name
 tformEE f (Range e1 e2) = Range (tformE f e1) (tformE f e2)
 tformEE f (ExplicitList exprs) = ExplicitList $ map (tformE f) exprs
 tformEE f@(_,_,fv,_) (Binop op e1 e2) = Binop (fv op) (tformE f e1) (tformE f e2)
@@ -40,16 +41,21 @@ tformEE f (Remove e1 field) = Remove (tformE f e1) field
 tformEE f (Insert e1 field e2) = Insert (tformE f e1) field (tformE f e2)
 tformEE f (Modify e1 mods) = Modify (tformE f e1) $ map (\(field, e) -> (field, tformE f e)) mods
 tformEE f (Record vars) = Record $ map (\(field, e) -> (field, tformE f e)) vars
-tformEE f@(_,_,fv,_) (PortIn s t) = PortIn s (tformT fv t)
+tformEE (_,_,fv,_) (PortIn s t) = PortIn s (tformT fv t)
 tformEE f@(_,_,fv,_) (PortOut s t e) = PortOut s (tformT fv t) $ tformE f e
 tformEE _ (GLShader s1 s2 ty) = GLShader s1 s2 ty
 
 --Transform a pattern
+--For these ones, there's only one type argument, so we can derive functor
 tformP :: (v -> vv) -> Pattern.Pattern v -> Pattern.Pattern vv
-tformP = error "TODO implement"
+tformP  = fmap
+
+deriving instance Functor Pattern.Pattern
+deriving instance Functor Type.Type
+
 
 tformT :: (v -> vv) -> Type.Type v -> Type.Type vv
-tformT = error "TODO implement"
+tformT = fmap
 
 --mapD :: (a -> b) -> ADef a -> ADef b
 --mapD f (Definition pat (A ann e) ty) = Definition pat (A (f ann) (mapEE f e)) ty
