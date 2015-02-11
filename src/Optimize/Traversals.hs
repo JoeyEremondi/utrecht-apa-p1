@@ -8,6 +8,7 @@ import qualified AST.Pattern as Pattern
 import qualified AST.Expression.Canonical as Canon
 import qualified AST.Variable as Var
 import qualified AST.Type as Type
+import qualified AST.Module as Module
 
 
 tformE ::  (a -> aa, d -> dd, v -> vv, Expr aa dd vv -> Expr aa dd vv)
@@ -79,3 +80,6 @@ foldEE fd f rootE@(PortOut s t e) = f rootE [foldE fd f e]
 --Leaf cases: fold with empty child list
 foldEE fd f e = f e []
 
+--Transform a parsed and typechecked interface
+--transformIface :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalModule -> Module.CanonicalModule
+--transformIface f iface = Module.toInterface $ 

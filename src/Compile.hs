@@ -10,6 +10,7 @@ import qualified Transform.AddDefaultImports as DefaultImports
 import qualified Transform.Check as Check
 import qualified Type.Inference as TI
 import qualified Transform.Canonicalize as Canonical
+import qualified Optimize.Optimize as Optimize
 import Elm.Utils ((|>))
 
 
@@ -48,7 +49,7 @@ compile user projectName interfaces source =
 
       -- Add the real list of tyes
       let body = (Module.body canonicalModule) { Module.types = types }
-
+      
       return $ canonicalModule { Module.body = body }
 
 

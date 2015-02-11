@@ -1,5 +1,5 @@
 module Elm.Compiler.Module
-    ( Interface, Name(Name)
+    ( Interface, Name(Name), Module
     , nameToPath
     , nameToString, nameFromString
     , hyphenate, dehyphenate
@@ -26,6 +26,8 @@ import qualified Elm.Compiler.Type.Extract as Extract
 -- EXPOSED TYPES
 
 type Interface = Module.Interface
+
+type Module = Module.CanonicalModule
 
 
 newtype Name = Name [String]
