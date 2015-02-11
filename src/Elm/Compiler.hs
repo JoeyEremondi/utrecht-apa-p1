@@ -58,26 +58,30 @@ compile
     -> String
     -> Map.Map PublicModule.Name PublicModule.Interface
     -> Either String (PublicModule.Interface, String)
-compile user packageName source interfaces = compileModule `fmap` parse user packageName source interfaces 
+compile user packageName source interfaces = do
+   (modul, iface) <- parse user packageName source interfaces
+   let js = compileModule modul
+   return (iface, js)
+   
 
 compileModule
   :: PublicModule.Module
-  -> (PublicModule.Interface, String)
-compileModule modul = (Module.toInterface modul, JS.generate modul)
+  -> String
+compileModule = JS.generate
 
 parse
     :: String
     -> String
     -> String
     -> Map.Map PublicModule.Name PublicModule.Interface
-    -> Either String PublicModule.Module
+    -> Either String (PublicModule.Module, PublicModule.Interface)
 parse user packageName source interfaces =
   let unwrappedInterfaces =
-        Map.mapKeysMonotonic (\(PublicModule.Name name) -> name) interfaces
+         Map.mapKeysMonotonic (\(PublicModule.Name name) -> name) interfaces
   in
       case Compile.compile user packageName unwrappedInterfaces source of
         Right modul ->
-            Right modul
+            Right (modul, Module.toInterface modul)
 
         Left docs ->
             map P.render docs
