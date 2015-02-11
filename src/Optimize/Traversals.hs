@@ -81,5 +81,10 @@ foldEE fd f rootE@(PortOut s t e) = f rootE [foldE fd f e]
 foldEE fd f e = f e []
 
 --Transform a parsed and typechecked interface
---transformIface :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalModule -> Module.CanonicalModule
---transformIface f iface = Module.toInterface $ 
+transformModule :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalModule -> Module.CanonicalModule
+transformModule f modul = modul {Module.body = newBody}
+  where newBody = transformBody f $ Module.body modul
+
+transformBody :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalBody -> Module.CanonicalBody
+transformBody f body = body {Module.program = newProgram}
+  where newProgram = f (Module.program body )

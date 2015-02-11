@@ -11,7 +11,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Text.PrettyPrint as P
 
-import qualified AST.Module as Module (HeaderAndImports(HeaderAndImports), toInterface)
+import qualified AST.Module as Module (HeaderAndImports(HeaderAndImports), toInterface, iExports)
 import qualified Compile
 import qualified Elm.Compiler.Module as PublicModule
 import qualified Elm.Compiler.Version as Version
@@ -19,6 +19,9 @@ import Elm.Utils ((|>))
 import qualified Generate.JavaScript as JS
 import qualified Parse.Helpers as Help
 import qualified Parse.Module as Parse
+import qualified AST.Variable as Var
+
+import qualified Optimize.Optimize as Optimize
 
 
 -- VERSION
@@ -88,18 +91,32 @@ attempt to optimize the given modules, assuming that the program will be run fro
 the entry point of `main` within the given main module-}              
 optimizeProgram
   :: PublicModule.Name 
-  -> Map.Map PublicModule.Name (PublicModule.Module, String)
-  -> Map.Map PublicModule.Name (PublicModule.Module, String)   
-optimizeProgram mainName interfaces = 
-  error "TODO implement"
-  
+  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
+  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)   
+optimizeProgram (PublicModule.Name mainNames) interfaces =
+  Optimize.optimize [PublicModule.Name $ mainNames ++ ["main"]] interfaces
+           
 {-| Given interfaces from compiled Elm modules and their compiled JavaScript,
 attempt to optimize the given modules, assuming that all functions in the given set of modules
 must be avaliable as a library, possibly to be called from JavaScrip.
 The main purpose of this is to prevent library functions from being marked as "dead code"-}          
 optimizeLibrary
-  :: Set.Set PublicModule.Name 
-  -> Map.Map PublicModule.Name (PublicModule.Module)
-  -> Map.Map PublicModule.Name (PublicModule.Module)   
-optimizeLibrary targets interfaces = 
-  error "TODO implement"
+  :: [PublicModule.Name] 
+  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
+  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)   
+--TODO make safe
+optimizeLibrary targets interfaces =
+  Optimize.optimize (concatMap exposedNames targets) interfaces
+    where
+      exposedNames name@(PublicModule.Name nameList) =
+        let
+          exposedVars = Module.iExports $ snd (interfaces Map.! name) 
+
+          --We don't care about exported constructors or type aliases
+          onlyValues = filter (\v -> case v of
+                                  (Var.Value v) -> True
+                                  _ -> False) exposedVars
+        in map
+           (\(Var.Value var) -> PublicModule.Name (nameList ++ [var] )) onlyValues
+      
+      
