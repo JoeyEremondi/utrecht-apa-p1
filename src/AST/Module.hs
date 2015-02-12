@@ -53,7 +53,7 @@ data CanonicalBody = CanonicalBody
     , aliases   :: Aliases
     , datatypes :: ADTs
     , ports     :: [String]
-    }
+    } deriving (Show)
 
 
 -- HEADERS
@@ -90,7 +90,7 @@ data Interface = Interface
     , iAliases  :: Aliases
     , iFixities :: [(Decl.Assoc, Int, String)]
     , iPorts    :: [String]
-    }
+    } deriving (Show)
 
 toInterface :: CanonicalModule -> Interface
 toInterface modul =

@@ -10,36 +10,68 @@ import qualified AST.Variable as Var
 import qualified AST.Type as Type
 import qualified AST.Module as Module
 
+--Given:
+--A function producing a new context for each child expression or def
+--   (this is always safe if the list is infinite)
+--An initial context, passed to our transforming functions
+--A tuple of functions which, given a context,
+--   transform the annotations, definitions, variables, and resulting expression
+--And an expression to transform
+--Recursively transform the expression and all its sub-expressions, generating
+--new contexts with the given function and passing them down as we go.
+--This is useful for things like numbering all expressions
+--Or traversing all definitions while keeping an environment
+tformE
+  :: (Expr' a d v -> context -> [context])
+  -> context
+  -> (context -> a -> aa,
+            context -> d -> dd,
+            context -> v -> vv,
+            context -> Expr aa dd vv -> Expr aa dd vv)
+  -> Expr a d v
+  -> Expr aa dd vv
+tformE cf ctx f@(fa, _fd, _fv, fe) (A ann e)  = fe ctx $ A (fa ctx ann) (tformEE cf ctx f e)
 
-tformE ::  (a -> aa, d -> dd, v -> vv, Expr aa dd vv -> Expr aa dd vv)
-       -> Expr a d v
-       -> Expr aa dd vv
-tformE f@(fa, _fd, _fv, fe) (A ann e) = fe $ A (fa ann) (tformEE f e)
+tformEE
+  :: (Expr' a d v -> context -> [context])
+  -> context
+  -> (context -> a -> aa,
+            context -> d -> dd,
+            context -> v -> vv,
+            context -> Expr aa dd vv -> Expr aa dd vv)
+  -> Expr' a d v
+  -> Expr' aa dd vv
+tformEE cf ctx f@(fa, fd, fv, fe) exp = let
+    --laziness lets us do this
+    ctxList = cf exp ctx
+    ctxTail = tail ctxList
+    (ctx1:ctx2:_) = ctxList
+  in case exp of
+   (Literal l) -> Literal l
+   (Var name) -> Var $ fv ctx name
+   (Range e1 e2) -> Range (tformE cf ctx1 f e1) (tformE cf ctx2 f e2)
+   (ExplicitList exprs) -> ExplicitList $ map (\(c,e) -> tformE cf c f e) $ zip ctxList exprs
+   (Binop op e1 e2) -> Binop (fv ctx op) (tformE cf ctx1 f e1) (tformE cf ctx2 f e2)
+   (Lambda pat body) -> Lambda (tformP (fv ctx) pat) (tformE cf ctx1 f body)
+   (App e1 e2) -> App (tformE cf ctx1 f e1) (tformE cf ctx1 f e2)
+   (MultiIf exprs) -> MultiIf $ map (\(c, (e1, e2)) -> (tformE cf c f e1, tformE cf c f e2))
+                      $ zip ctxList exprs
+   (Let defs body) -> Let (map (\(c,d) -> fd c d)$ zip ctxTail defs) (tformE cf ctx1 f body)
+   (Case e1 cases) -> Case (tformE cf ctx1 f e1) $ map
+                      (\(c, (p,e)) -> (tformP (fv ctx) p, tformE cf c f e)) $ zip ctxTail cases
+   (Data ctor exprs) -> Data ctor $ map (tformE cf ctx1 f) exprs
+   --record cases
+   (Access e1 field) -> Access (tformE cf ctx1 f e1) field
+   (Remove e1 field) -> Remove (tformE cf ctx1 f e1) field
+   (Insert e1 field e2) -> Insert (tformE cf ctx1 f e1) field (tformE cf ctx1 f e2)
+   (Modify e1 mods) -> Modify (tformE cf ctx1 f e1) $ map
+                       (\(c, (field, e)) -> (field, tformE cf c f e)) $ zip ctxTail mods
+   (Record vars) -> Record $ map (\(c,(field, e)) -> (field, tformE cf c f e)) $ zip ctxList vars
+   (PortIn s t) -> PortIn s (tformT (fv ctx) t)
+   (PortOut s t e) -> PortOut s (tformT (fv ctx) t) $ tformE cf ctx1 f e
+   (GLShader s1 s2 ty) -> GLShader s1 s2 ty
 
-tformEE :: (a -> aa, d -> dd, v -> vv, Expr aa dd vv -> Expr aa dd vv)
-        -> Expr' a d v
-        -> Expr' aa dd vv
-tformEE _ (Literal l) = Literal l
-tformEE (_,_,fv,_) (Var name) = Var $ fv name
-tformEE f (Range e1 e2) = Range (tformE f e1) (tformE f e2)
-tformEE f (ExplicitList exprs) = ExplicitList $ map (tformE f) exprs
-tformEE f@(_,_,fv,_) (Binop op e1 e2) = Binop (fv op) (tformE f e1) (tformE f e2)
-tformEE f@(_,_,fv,_) (Lambda pat body) = Lambda (tformP fv pat) (tformE f body)
-tformEE f (App e1 e2) = App (tformE f e1) (tformE f e2)
-tformEE f (MultiIf exprs) = MultiIf $ map (\(e1, e2) -> (tformE f e1, tformE f e2)) exprs
-tformEE f@(_,fd,_,_) (Let defs body) = Let (map fd defs) (tformE f body)
-tformEE f@(_,_,fv,_) (Case e1 cases) = Case (tformE f e1) (map (\(p,e) -> (tformP fv p, tformE f e)) cases)
-tformEE f (Data ctor exprs) = Data ctor $ map (tformE f) exprs
---record cases
-tformEE f (Access e1 field) = Access (tformE f e1) field
-tformEE f (Remove e1 field) = Remove (tformE f e1) field
-tformEE f (Insert e1 field e2) = Insert (tformE f e1) field (tformE f e2)
-tformEE f (Modify e1 mods) = Modify (tformE f e1) $ map (\(field, e) -> (field, tformE f e)) mods
-tformEE f (Record vars) = Record $ map (\(field, e) -> (field, tformE f e)) vars
-tformEE (_,_,fv,_) (PortIn s t) = PortIn s (tformT fv t)
-tformEE f@(_,_,fv,_) (PortOut s t e) = PortOut s (tformT fv t) $ tformE f e
-tformEE _ (GLShader s1 s2 ty) = GLShader s1 s2 ty
-
+  
 --Transform a pattern
 --For these ones, there's only one type argument, so we can derive functor
 tformP :: (v -> vv) -> Pattern.Pattern v -> Pattern.Pattern vv
@@ -57,28 +89,50 @@ tformT = fmap
 --mapD :: (a -> b) -> ADef a -> ADef b
 --mapD f (Definition pat (A ann e) ty) = Definition pat (A (f ann) (mapEE f e)) ty
 
-foldE :: (d -> [Expr a d v]) -> (Expr' a d v -> [b] -> b) -> Expr a d v -> b
-foldE fd f (A ann e) = (foldEE fd f e)
+foldE
+  ::(Expr' a d v -> context -> [context]) --context generator
+  -> context --initial context
+  -> (d -> [Expr a d v]) --get expressions for definitions
+  -> (context -> Expr' a d v -> [b] -> b) --function incorporating results from lower levels
+  -> Expr a d v --initial expression
+  -> b --result
+foldE cf ctx fd f (A ann e) = (foldEE cf ctx fd f e)
 
-foldEE :: (d -> [Expr a d v]) -> (Expr' a d v -> [b] -> b) -> Expr' a d v -> b
-foldEE fd f rootE@(Range e1 e2) = f rootE [foldE fd f e1, foldE fd f e2]
-foldEE fd f rootE@(ExplicitList exprs) = f rootE $ map (foldE fd f) exprs
-foldEE fd f rootE@(Binop op e1 e2) = f rootE [foldE fd f e1, foldE fd f e2]
-foldEE fd f rootE@(Lambda pat body) = f rootE [foldE fd f body]
-foldEE fd f rootE@(App e1 e2) = f rootE [foldE fd f e1, foldE fd f e2]
-foldEE fd f rootE@(MultiIf exprs) = f rootE $ concatMap (\(e1, e2) -> [foldE fd f e1, foldE fd f e2]) exprs
-foldEE fd f rootE@(Let defs body) = f rootE $ (map (foldE fd f) (concatMap fd defs)) ++ [foldE fd f body]
-foldEE fd f rootE@(Case e1 cases) = f rootE $ [foldE fd f e1] ++ (map ( (foldE fd f) . snd ) cases)
-foldEE fd f rootE@(Data ctor exprs) = f rootE  $ map (foldE fd f) exprs
---record cases
-foldEE fd f rootE@(Access e1 field) = f rootE [foldE fd f e1]
-foldEE fd f rootE@(Remove e1 field) = f rootE [foldE fd f e1] 
-foldEE fd f rootE@(Insert e1 field e2) = f rootE $ [foldE fd f e1, foldE fd f e2]
-foldEE fd f rootE@(Modify e1 mods) = f rootE $ [foldE fd f e1] ++ map ((foldE fd f) . snd) mods
-foldEE fd f rootE@(Record vars) = f rootE $ map ((foldE fd f) . snd) vars
-foldEE fd f rootE@(PortOut s t e) = f rootE [foldE fd f e]
---Leaf cases: fold with empty child list
-foldEE fd f e = f e []
+foldEE
+  ::(Expr' a d v -> context -> [context]) --context generator
+  -> context --initial context
+  -> (d -> [Expr a d v]) --get expressions for definitions
+  -> (context -> Expr' a d v -> [b] -> b) --function incorporating results from lower levels
+  -> Expr' a d v --initial expression
+  -> b --result
+foldEE cf ctx fd f rootE = let
+    --laziness lets us do this
+    ctxList = cf rootE ctx
+    ctxTail = tail ctxList
+    (ctx1:ctx2:_) = ctxList
+  in f ctx rootE $ case rootE of
+    (Range e1 e2) -> [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]
+    (ExplicitList exprs) ->  map (\(c,e) -> foldE cf c fd f e) $ zip ctxList exprs
+    (Binop op e1 e2) -> [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]
+    (Lambda pat body) -> [foldE cf ctx1 fd f body]
+    (App e1 e2) -> [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]
+    (MultiIf exprs) ->  concatMap (\(e1, e2) -> [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]) exprs
+    (Let defs body) -> 
+                       (map (\(c,e) -> foldE cf c fd f e ) $ zip ctxTail (concatMap fd defs))
+                       ++ [foldE cf ctx1 fd f body]
+    (Case e1 cases) ->  [foldE cf ctx1 fd f e1]
+                       ++ (map ( (\(c,e) ->foldE cf c fd f e) ) $ zip ctxTail (map snd cases) )
+    (Data ctor exprs) ->   map (\(c,e) -> foldE cf c fd f e) $ zip ctxList exprs
+   --record cases
+    (Access e1 field) -> [foldE cf ctx1 fd f e1]
+    (Remove e1 field) -> [foldE cf ctx1 fd f e1] 
+    (Insert e1 field e2) ->  [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]
+    (Modify e1 mods) ->  [foldE cf ctx1 fd f e1]
+                        ++ (map ((\(c,e) -> foldE cf c fd f e) ) $ zip ctxTail $ map snd mods)
+    (Record vars) ->  map ((\(c,e) -> foldE cf c fd f e) ) $ zip ctxList $ map snd vars
+    (PortOut s t e) -> [foldE cf ctx1 fd f e]
+   --Leaf cases: fold with empty child list
+    _ -> []
 
 --Transform a parsed and typechecked interface
 transformModule :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalModule -> Module.CanonicalModule
