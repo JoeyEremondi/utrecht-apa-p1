@@ -142,3 +142,17 @@ transformModule f modul = modul {Module.body = newBody}
 transformBody :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalBody -> Module.CanonicalBody
 transformBody f body = body {Module.program = newProgram}
   where newProgram = f (Module.program body )
+
+--TODO move to better place
+newtype Label = Label [Int]
+
+
+--Identity ignoring context
+cid = (\_ x -> x)
+
+makeLabels :: Expr a d v -> Expr (a, Label) d v
+makeLabels = tformE
+  (\_ (Label l) -> map (\i -> Label $ [i]++l) [1..] )
+  (Label [])
+  ( (\c a -> (a,c)), cid, cid, cid)
+  
