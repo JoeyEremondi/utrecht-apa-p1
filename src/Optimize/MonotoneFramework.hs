@@ -27,20 +27,20 @@ data ProgramInfo label = ProgramInfo {
 incoming :: (Ord block) => CFG block -> block -> Set.Set block
 incoming (CFG controlFlow) l = Set.map snd $ Set.filter ((== l) . fst) controlFlow
 
-class (Ord a, Eq a) => CompleteLattice a where
-  latticeTop :: a
+class (Ord a, Eq a) => Lattice a where
+  --latticeTop :: a
   latticeBottom :: a
   latticeJoin :: a -> a -> a
   iota :: a --Extremal value for our analysis
-  lleq :: a -> a -> bool
+  lleq :: a -> a -> Bool
 
 
 
-joinAll :: (CompleteLattice a) => Set.Set a -> a
+joinAll :: (Lattice a) => Set.Set a -> a
 joinAll = Set.foldr latticeJoin latticeBottom
 
 --worklist algo for least fixed point
-minFP :: (CompleteLattice payload, Ord label) =>
+minFP :: (Lattice payload, Ord label) =>
          (payload -> payload)
          -> ProgramInfo label
          -> (Map.Map label payload, Map.Map label payload) 
