@@ -22,7 +22,7 @@ import qualified AST.Module as Module
 --This is useful for things like numbering all expressions
 --Or traversing all definitions while keeping an environment
 tformE
-  :: (Expr' a d v -> context -> [context])
+  :: (Expr a d v -> context -> [context])
   -> context
   -> (context -> a -> aa,
             context -> d -> dd,
@@ -30,10 +30,11 @@ tformE
             context -> Expr aa dd vv -> Expr aa dd vv)
   -> Expr a d v
   -> Expr aa dd vv
-tformE cf ctx f@(fa, _fd, _fv, fe) (A ann e)  = fe ctx $ A (fa ctx ann) (tformEE cf ctx f e)
+tformE cf ctx f@(fa, _fd, _fv, fe) ea@(A ann e)  = fe ctx $ A (fa ctx ann) (tformEE cf (cf ea ctx) ctx f e)
 
 tformEE
-  :: (Expr' a d v -> context -> [context])
+  :: (Expr a d v -> context -> [context])
+  -> [context]
   -> context
   -> (context -> a -> aa,
             context -> d -> dd,
@@ -41,9 +42,9 @@ tformEE
             context -> Expr aa dd vv -> Expr aa dd vv)
   -> Expr' a d v
   -> Expr' aa dd vv
-tformEE cf ctx f@(fa, fd, fv, fe) exp = let
+tformEE cf ctxList ctx f@(fa, fd, fv, fe) exp = let
     --laziness lets us do this
-    ctxList = cf exp ctx
+    --ctxList = cf exp ctx
     ctxTail = tail ctxList
     (ctx1:ctx2:_) = ctxList
   in case exp of
@@ -90,24 +91,25 @@ tformT = fmap
 --mapD f (Definition pat (A ann e) ty) = Definition pat (A (f ann) (mapEE f e)) ty
 
 foldE
-  ::(Expr' a d v -> context -> [context]) --context generator
+  ::(Expr a d v -> context -> [context]) --context generator
   -> context --initial context
   -> (d -> [Expr a d v]) --get expressions for definitions
   -> (context -> Expr' a d v -> [b] -> b) --function incorporating results from lower levels
   -> Expr a d v --initial expression
   -> b --result
-foldE cf ctx fd f (A ann e) = (foldEE cf ctx fd f e)
+foldE cf ctx fd f ea@(A ann e) = (foldEE (cf ea ctx) cf ctx fd f e)
 
 foldEE
-  ::(Expr' a d v -> context -> [context]) --context generator
+  :: [context] ->
+  (Expr a d v -> context -> [context]) --context generator
   -> context --initial context
   -> (d -> [Expr a d v]) --get expressions for definitions
   -> (context -> Expr' a d v -> [b] -> b) --function incorporating results from lower levels
   -> Expr' a d v --initial expression
   -> b --result
-foldEE cf ctx fd f rootE = let
+foldEE ctxList cf ctx fd f rootE = let
     --laziness lets us do this
-    ctxList = cf rootE ctx
+    --ctxList = cf rootE ctx
     ctxTail = tail ctxList
     (ctx1:ctx2:_) = ctxList
   in f ctx rootE $ case rootE of
@@ -150,9 +152,25 @@ newtype Label = Label [Int]
 --Identity ignoring context
 cid = (\_ x -> x)
 
-makeLabels :: Expr a d v -> Expr (a, Label) d v
-makeLabels = tformE
+makeLabels :: Label -> Expr a d v -> Expr (a, Label) d v
+makeLabels init = tformE
   (\_ (Label l) -> map (\i -> Label $ [i]++l) [1..] )
-  (Label [])
+  (init)
   ( (\c a -> (a,c)), cid, cid, cid)
-  
+
+liftAnn :: (Expr' a d v -> r) -> (Expr a d v -> r)
+liftAnn f (A _ e) = f e
+
+tformEverywhere :: (Expr a d v -> Expr a d v) -> Expr a d v -> Expr a d v
+tformEverywhere f = tformE
+                  (\_ _ -> repeat ())
+                  ()
+                  (cid, cid, cid, \_ -> f)
+
+tformModule :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalModule -> Module.CanonicalModule
+tformModule f m =
+  let
+    body = Module.body m
+    exp = Module.program $ body
+    newBody = body {Module.program = f exp}
+  in m {Module.body = newBody} --TODO more cleanup to be done?

@@ -8,6 +8,8 @@ import qualified Data.Map as Map
 import qualified Elm.Compiler.Module as PublicModule
 import qualified AST.Variable as Var
 
+import qualified Optimize.Reachability as Reachability
+
 type OptFun = 
   [PublicModule.Name] 
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
@@ -23,7 +25,8 @@ optimize targets initialModules = foldr (\f modDict ->
 
 
 allOpts :: [OptFun]
-allOpts = []
+allOpts = [Reachability.removeUnreachable
+          ]
 
 
 

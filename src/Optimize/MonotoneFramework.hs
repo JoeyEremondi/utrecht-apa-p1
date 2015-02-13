@@ -17,7 +17,7 @@ newtype CFG block = CFG (Set.Set (block, block))
 
 data ProgramInfo label = ProgramInfo {
   edgeMap :: label -> [label],
-  labelRange :: (label, label),
+  --labelRange :: (label, label),
   allLabels :: [label],
   labelPairs :: [(label, label)],
   isExtremal :: label -> Bool
@@ -40,11 +40,14 @@ joinAll :: (Lattice a) => Set.Set a -> a
 joinAll = Set.foldr latticeJoin latticeBottom
 
 --worklist algo for least fixed point
+--We don't actually need to pass in bottom, but it helps the typechecker
+--figure out which lattice we're using
 minFP :: (Lattice payload, Ord label) =>
+         payload ->
          (payload -> payload)
          -> ProgramInfo label
          -> (Map.Map label payload, Map.Map label payload) 
-minFP f info = (mfpOpen, mfpClosed)
+minFP _bottom f info = (mfpOpen, mfpClosed)
   where
     mfpClosed = Map.map f mfpOpen
     --stResult :: ST s [(label, payload)]
