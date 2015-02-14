@@ -14,6 +14,8 @@ import qualified Data.List as List
 --These environments will often be used as "context" for tree traversals
 type Env l = (Map.Map (Var.Canonical ) l)
 
+type CanonEnv = Env Var.Canonical
+
 makeLocal :: String -> Var.Canonical
 makeLocal s = Var.Canonical (Var.Local) s
 
