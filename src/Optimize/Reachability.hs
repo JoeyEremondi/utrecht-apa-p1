@@ -1,4 +1,4 @@
-module Optimize.Reachability (removeUnreachable) where
+module Optimize.Reachability (removeUnreachable, removeUnreachableModule) where
 
 import Optimize.MonotoneFramework
 
@@ -91,3 +91,13 @@ removeUnreachable targets mods =
      $ zip dictPairs outPairs
 
 
+removeUnreachableModule :: Name -> (Module, Interface) -> (Module, Interface)
+removeUnreachableModule name@(Name nlist) modul =
+  let
+    varToValList v = case v of
+      Var.Value s -> [Name $ nlist ++ [s]]
+      _ -> []
+    targets = concatMap varToValList $ Module.exports $ fst modul
+    inMap = Map.fromList [(name, modul)]
+
+  in snd $ head $ Map.toList $ removeUnreachable targets inMap

@@ -48,7 +48,6 @@ parseDependencies src =
                 , map (PublicModule.Name . fst) imports
                 )
 
-
 -- COMPILATION
 
 {-| Compiles Elm source code to JavaScript. -}
@@ -80,8 +79,11 @@ parse user packageName source interfaces =
          Map.mapKeysMonotonic (\(PublicModule.Name name) -> name) interfaces
   in
       case Compile.compile user packageName unwrappedInterfaces source of
-        Right modul ->
-            Right (modul, Module.toInterface modul)
+        Right modul -> do
+          (name, _) <- parseDependencies source
+          let iface = Module.toInterface modul
+          let (optModul, optIface) = Optimize.optimizeModule name (modul, iface) --TODO flags?
+          return (optModul, optIface)
 
         Left docs ->
             map P.render docs
@@ -98,7 +100,7 @@ optimizeProgram
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)   
 optimizeProgram (PublicModule.Name mainNames) interfaces =
-  Optimize.optimize [PublicModule.Name $ mainNames ++ ["main"]] interfaces
+  Optimize.optimizeProgram [PublicModule.Name $ mainNames ++ ["main"]] interfaces
            
 {-| Given interfaces from compiled Elm modules and their compiled JavaScript,
 attempt to optimize the given modules, assuming that all functions in the given set of modules
@@ -110,7 +112,7 @@ optimizeLibrary
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)   
 --TODO make safe
 optimizeLibrary targets interfaces =
-  Optimize.optimize (concatMap exposedNames targets) interfaces
+  Optimize.optimizeProgram (concatMap exposedNames targets) interfaces
     where
       exposedNames name@(PublicModule.Name nameList) =
         let

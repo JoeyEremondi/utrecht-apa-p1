@@ -9,24 +9,34 @@ import qualified Elm.Compiler.Module as PublicModule
 import qualified AST.Variable as Var
 
 import qualified Optimize.Reachability as Reachability
+import qualified Optimize.ForwardSlicing as ForwardSlicing
 
-type OptFun = 
+type WholeProgOptFun = 
   [PublicModule.Name] 
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface) 
+
+type ModuleOptFun = PublicModule.Name
+                    -> (PublicModule.Module, PublicModule.Interface)
+                    -> (PublicModule.Module, PublicModule.Interface)
 
 {-|
 Apply a list of transformations to our canonical ASTs.
 The resulting Canonical AST is passed to the generator.
 |-}
-optimize :: OptFun 
-optimize targets initialModules = foldr (\f modDict ->
-                                            f targets modDict) initialModules allOpts
+optimizeProgram :: WholeProgOptFun 
+optimizeProgram targets initialModules = foldr (\f modDict ->
+                                            f targets modDict) initialModules wholeProgOpts
+
+optimizeModule :: ModuleOptFun
+optimizeModule name initialMod =  foldr (\f modDict -> f name modDict) initialMod  moduleOpts
 
 
-allOpts :: [OptFun]
-allOpts = [Reachability.removeUnreachable
+wholeProgOpts :: [WholeProgOptFun]
+wholeProgOpts = [Reachability.removeUnreachable
+                 , ForwardSlicing.removeDeadCodeWP
           ]
 
-
-
+moduleOpts :: [ModuleOptFun]
+moduleOpts = [Reachability.removeUnreachableModule
+             , ForwardSlicing.removeDeadCodeModule ]
