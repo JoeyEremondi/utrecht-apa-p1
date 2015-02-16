@@ -7,29 +7,24 @@ import qualified AST.Pattern as Pattern
 import Elm.Compiler.Module
 import qualified AST.Variable as Var
 import qualified Data.List as List
+import Optimize.Types
 
---We use maps to store what variables are and aren't in scope at a given level
---And the label of the expression in which they were declared
---We never store values for the variables, so we can just use sets
---These environments will often be used as "context" for tree traversals
-type Env l = (Map.Map (Var.Canonical ) l)
 
-type CanonEnv = Env Var.Canonical
 
-makeLocal :: String -> Var.Canonical
+makeLocal :: String -> Var
 makeLocal s = Var.Canonical (Var.Local) s
 
-addContext :: Name -> Var.Canonical -> Var.Canonical
+addContext :: Name -> Var -> Var
 addContext (Name modList) (Var.Canonical Var.Local name) = Var.Canonical (Var.Module modList) name
 addContext _ v = v
 
-nameToVar :: Name -> Var.Canonical
+nameToVar :: Name -> Var
 nameToVar (Name lReversed) = case l of
   [n] -> Var.Canonical Var.Local n
   (n:reversedPath) -> Var.Canonical (Var.Module $ reverse reversedPath) n
   where l = reverse lReversed
         
-getPatternVars :: Pattern.CanonicalPattern  -> [Var.Canonical]
+getPatternVars :: Pattern.CanonicalPattern  -> [Var]
 getPatternVars (Pattern.Data _ pats) = concatMap getPatternVars pats
 getPatternVars (Pattern.Record strs) = map makeLocal strs --TODO check this case
 getPatternVars (Pattern.Alias s p) = [makeLocal s] ++ (getPatternVars p) --TODO check this case
@@ -39,9 +34,9 @@ getPatternVars (Pattern.Literal _) = []
 
 extendEnv
   :: (Ord l)
-  => (d -> [Var.Canonical])
-  -> (Expr a d Var.Canonical -> l)
-  -> Expr a d Var.Canonical
+  => (d -> [Var])
+  -> (Expr a d Var -> l)
+  -> Expr a d Var
   -> Env l
   -> [Env l]
 extendEnv getDefined getLabel expr env = case expr of

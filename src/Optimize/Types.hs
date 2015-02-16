@@ -1,0 +1,38 @@
+module Optimize.Types where
+
+import qualified AST.Pattern as Pattern
+import qualified AST.Expression.Canonical as Canon
+import AST.Type as CanonicalType
+import AST.Expression.General
+import qualified AST.Annotation as Annotate
+import qualified AST.Variable as Var
+import qualified Data.Map as Map
+
+
+--Generic place to put types and definitions
+--To avoid dep cycles
+
+--Export from AST so that things are nice and encapsulated
+type Region = Annotate.Region
+
+type Var = Var.Canonical
+
+type Pattern = Pattern.CanonicalPattern
+
+--Environment types
+--We use maps to store what variables are and aren't in scope at a given level
+--And the label of the expression in which they were declared
+--We never store values for the variables, so we can just use sets
+--These environments will often be used as "context" for tree traversals
+type Env l = (Map.Map (Var ) l)
+
+type CanonEnv = Env Var.Canonical
+
+
+data GenericDef a v = GenericDef Pattern (Expr a (GenericDef a v) v) (Maybe CanonicalType) 
+
+--TODO move to better place
+newtype Label = Label [Int]
+  deriving (Eq, Ord, Show)
+
+type LabeledExp = Expr (Region, Label, Env Label) (GenericDef (Region, Label, Env Label) Var) Var

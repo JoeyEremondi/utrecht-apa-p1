@@ -4,17 +4,16 @@ module Optimize.Traversals where
 import Optimize.Environment
 
 import  AST.Expression.General
-import AST.Annotation
-import AST.Type (CanonicalType)
+import AST.Annotation (Annotated(A))
 import qualified AST.Pattern as Pattern
 import qualified AST.Expression.Canonical as Canon
-import qualified AST.Variable as Var
+import qualified AST.Variable as Var 
 import qualified AST.Type as Type
 import qualified AST.Module as Module
 import qualified Data.Map as Map
-import qualified AST.Annotation as Annotation
+--import qualified AST.Annotation as Annotation
 
-data GenericDef a v = GenericDef Pattern.CanonicalPattern (Expr a (GenericDef a v) v) (Maybe CanonicalType) 
+import Optimize.Types
 
 --Given:
 --A function producing a new context for each child expression or def
@@ -151,9 +150,6 @@ transformBody :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalBody -> Module.Ca
 transformBody f body = body {Module.program = newProgram}
   where newProgram = f (Module.program body )
 
---TODO move to better place
-newtype Label = Label [Int]
-  deriving (Eq, Ord, Show)
 
 
 --Identity ignoring context
@@ -162,7 +158,7 @@ cid = (\_ x -> x)
 tformDef :: (Expr a (GenericDef a v) v -> Expr aa (GenericDef aa vv) vv) -> GenericDef a v -> GenericDef aa vv
 tformDef f (GenericDef p e t) = GenericDef p (f e) t
 
-makeGenericDefs :: Canon.Expr -> Expr Annotation.Region (GenericDef Annotation.Region Var.Canonical) Var.Canonical
+makeGenericDefs :: Canon.Expr -> Expr Region (GenericDef Region Var) Var
 makeGenericDefs = tformE
                   (\_ _ -> repeat ())
                   ()
@@ -174,16 +170,16 @@ makeLabels init = tformE
   (init)
   ( (\c a -> (a,c)), \_ -> tformDef (makeLabels init), cid, cid)
 
-addScope :: Expr (a, Label) (GenericDef (a,Label) Var.Canonical) Var.Canonical -> Expr (a, Label, Env Label) (GenericDef (a, Label, Env Label) Var.Canonical) Var.Canonical
+addScope :: Expr (a, Label) (GenericDef (a,Label) Var) Var -> Expr (a, Label, Env Label) (GenericDef (a, Label, Env Label) Var) Var
 addScope = tformE
            (extendEnv varsForDef (\(A (_,l) _) -> l ) )
            Map.empty
            ((\env (a,l) -> (a,l,env)), \_ d -> tformDef addScope d, cid, cid)
 
-varsForDef :: GenericDef a Var.Canonical -> [Var.Canonical]
+varsForDef :: GenericDef a Var -> [Var.Canonical]
 varsForDef (GenericDef p e v) = getPatternVars p
 
-annotateCanonical :: Label -> Canon.Expr -> Expr (Annotation.Region, Label, Env Label) (GenericDef (Annotation.Region, Label, Env Label) Var.Canonical) Var.Canonical
+annotateCanonical :: Label -> Canon.Expr -> LabeledExp
 annotateCanonical initLabel = addScope . (makeLabels initLabel) . makeGenericDefs 
 
 
