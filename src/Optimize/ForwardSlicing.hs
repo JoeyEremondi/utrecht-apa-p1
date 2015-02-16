@@ -6,9 +6,25 @@ import Optimize.Traversals
 import qualified AST.Module as Module
 import qualified AST.Expression.Canonical as Canon
 
+import Optimize.Types
+
 --Our different types of control nodes
 data ControlNode =
-  Statement (Expr)
+  Statement (LabeledExpr)
+  | Call (LabeledExpr)
+  | Return (LabeledExpr)
+  | ProcEntry (LabeledExpr)
+  | ProcExit (LabeledExpr)
+  | ForcedDependency --Special unique node, connected to everything
+  | GlobalEntry --Always the first node
+  | GlobalExit --Always the last node
+
+
+--Generate control-flow edges for a single expression
+--We then pass this function to a fold, which collects them
+makeEdges :: LabeledExpr -> [ControlNode]
+makeEdges = error "TODO implement makeEdges"
+    
 
 removeDeadCodeWP :: [Name] 
   -> Map.Map Name (Module, Interface)

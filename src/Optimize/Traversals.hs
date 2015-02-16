@@ -179,7 +179,7 @@ addScope = tformE
 varsForDef :: GenericDef a Var -> [Var.Canonical]
 varsForDef (GenericDef p e v) = getPatternVars p
 
-annotateCanonical :: Label -> Canon.Expr -> LabeledExp
+annotateCanonical :: Label -> Canon.Expr -> LabeledExpr
 annotateCanonical initLabel = addScope . (makeLabels initLabel) . makeGenericDefs 
 
 

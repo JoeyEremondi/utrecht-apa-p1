@@ -12,6 +12,8 @@ import Optimize.Environment
 import AST.Variable as Var
 import Optimize.Traversals
 
+import Optimize.Types
+
 newtype IsReachable = IsReachable {fromReachable :: Bool}
   deriving (Eq, Ord)
 
