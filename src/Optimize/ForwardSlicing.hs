@@ -21,6 +21,7 @@ data ControlNode =
   | GlobalEntry --Always the first node
   | GlobalExit --Always the last node
 
+type ControlEdge = (ControlNode, ControlNode)
 
 functionName :: LabeledExpr -> Maybe Var
 functionName (A _ e) = case e of
@@ -40,7 +41,7 @@ oneLevelEdges
   :: Map.Map Var Int
   -> Map.Map Var (ControlNode, ControlNode) --Map of entry and exit nodes
   -> LabeledExpr
-  -> Maybe [(ControlNode, ControlNode)]
+  -> Maybe [ControlEdge]
 oneLevelEdges aritys fnNodes e@(A (_,_,env) e') =
   case e' of
     (Range e1 e2) -> return [(Start e, Start e1), (End e1, Start e2), (End e2, End e)]
@@ -101,7 +102,19 @@ oneLevelEdges aritys fnNodes e@(A (_,_,env) e') =
     (PortOut _ _ e1) -> return $ [(Start e, Start e1), (End e1, End e)]
     (GLShader _ _ _ ) -> return []
 
-
+allEdges
+  :: Map.Map Var Int
+  -> Map.Map Var (ControlNode, ControlNode)
+  -> LabeledExpr
+  -> Maybe [(ControlNode, ControlNode)]
+allEdges aritys fnNodes = foldE
+           (\ _ () -> repeat ())
+           ()
+           (\(GenericDef _ e v) -> [e])
+           (\ _ e maybeSubs -> do
+               thisLevel <- oneLevelEdges aritys fnNodes e
+               subEdges <- sequence maybeSubs
+               return $ thisLevel ++ (concat subEdges))
 
 removeDeadCodeWP :: [Name] 
   -> Map.Map Name (Module, Interface)

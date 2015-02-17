@@ -99,25 +99,25 @@ foldE
   ::(Expr a d v -> context -> [context]) --context generator
   -> context --initial context
   -> (d -> [Expr a d v]) --get expressions for definitions
-  -> (context -> Expr' a d v -> [b] -> b) --function incorporating results from lower levels
+  -> (context -> Expr a d v -> [b] -> b) --function incorporating results from lower levels
   -> Expr a d v --initial expression
   -> b --result
-foldE cf ctx fd f ea@(A ann e) = (foldEE (cf ea ctx) cf ctx fd f e)
+foldE cf ctx fd f ea@(A ann e) = f ctx ea (foldEE (cf ea ctx) cf ctx fd f e)
 
 foldEE
   :: [context] ->
   (Expr a d v -> context -> [context]) --context generator
   -> context --initial context
   -> (d -> [Expr a d v]) --get expressions for definitions
-  -> (context -> Expr' a d v -> [b] -> b) --function incorporating results from lower levels
+  -> (context -> Expr a d v -> [b] -> b) --function incorporating results from lower levels
   -> Expr' a d v --initial expression
-  -> b --result
+  -> [b] --result
 foldEE ctxList cf ctx fd f rootE = let
     --laziness lets us do this
     --ctxList = cf rootE ctx
     ctxTail = tail ctxList
     (ctx1:ctx2:_) = ctxList
-  in f ctx rootE $ case rootE of
+  in case rootE of
     (Range e1 e2) -> [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]
     (ExplicitList exprs) ->  map (\(c,e) -> foldE cf c fd f e) $ zip ctxList exprs
     (Binop op e1 e2) -> [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]
