@@ -170,17 +170,23 @@ makeLabels init = tformE
   (init)
   ( (\c a -> (a,c)), \_ -> tformDef (makeLabels init), cid, cid)
 
-addScope :: Expr (a, Label) (GenericDef (a,Label) Var) Var -> Expr (a, Label, Env Label) (GenericDef (a, Label, Env Label) Var) Var
-addScope = tformE
+addScope
+  :: Env Label
+  -> Expr (a, Label) (GenericDef (a,Label) Var) Var
+  -> Expr (a, Label, Env Label) (GenericDef (a, Label, Env Label) Var) Var
+addScope startEnv = tformE
            (extendEnv varsForDef (\(A (_,l) _) -> l ) )
-           Map.empty
-           ((\env (a,l) -> (a,l,env)), \_ d -> tformDef addScope d, cid, cid)
+           startEnv
+           ((\env (a,l) -> (a,l,env)),
+            \env d -> tformDef (addScope env) d,
+            cid,
+            cid)
 
 varsForDef :: GenericDef a Var -> [Var.Canonical]
 varsForDef (GenericDef p e v) = getPatternVars p
 
-annotateCanonical :: Label -> Canon.Expr -> LabeledExpr
-annotateCanonical initLabel = addScope . (makeLabels initLabel) . makeGenericDefs 
+annotateCanonical :: Env Label -> Label -> Canon.Expr -> LabeledExpr
+annotateCanonical initEnv initLabel = (addScope initEnv) . (makeLabels initLabel) . makeGenericDefs 
 
 
 --Useful when we apply a bunch of annotations and get nested tuples

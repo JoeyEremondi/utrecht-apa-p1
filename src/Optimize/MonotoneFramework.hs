@@ -43,13 +43,12 @@ joinAll = Set.foldr latticeJoin latticeBottom
 --We don't actually need to pass in bottom, but it helps the typechecker
 --figure out which lattice we're using
 minFP :: (Lattice payload, Ord label) =>
-         payload ->
-         (payload -> payload)
+         (label -> payload -> payload)
          -> ProgramInfo label
          -> (Map.Map label payload, Map.Map label payload) 
-minFP _bottom f info = (mfpOpen, mfpClosed)
+minFP f info = (mfpOpen, mfpClosed)
   where
-    mfpClosed = Map.map f mfpOpen
+    mfpClosed = Map.mapWithKey f mfpOpen
     --stResult :: ST s [(label, payload)]
     initialSolns = foldr (\l solnsSoFar ->
                              if isExtremal info l
@@ -61,7 +60,7 @@ minFP _bottom f info = (mfpOpen, mfpClosed)
     iterateSolns currentSolns ((l,l'):rest) = let
       al = currentSolns Map.! l
       al' = currentSolns Map.! l'
-      fal = f al
+      fal = f l al
       (newPairs, newSolns) =
         if (fal `lleq` al') 
         then let

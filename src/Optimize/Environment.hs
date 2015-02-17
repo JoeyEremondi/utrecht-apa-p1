@@ -1,14 +1,15 @@
 module Optimize.Environment where
 
 import qualified Data.Map as Map
-import AST.Expression.General
+import AST.Expression.General 
 import AST.Annotation
 import qualified AST.Pattern as Pattern
 import Elm.Compiler.Module
+import AST.Module (body, program)
 import qualified AST.Variable as Var
 import qualified Data.List as List
 import Optimize.Types
-
+--import AST.Expression.Canonical as Canon
 
 
 makeLocal :: String -> Var
@@ -46,3 +47,12 @@ extendEnv getDefined getLabel expr env = case expr of
     repeat $ Map.union env $ Map.fromList $ [(v, label) | v <- getPatternVars pat]
   _ -> repeat env
   where label = getLabel expr
+
+globalEnv :: LabeledExpr ->  Env Label
+globalEnv expr  =
+  let
+    (A (_,label,_) (Let defs _)) = expr
+    
+  in foldr (\(GenericDef pat _ _) env ->
+             foldr (\v newEnv -> Map.insert v label newEnv) env (getPatternVars pat)) Map.empty defs
+

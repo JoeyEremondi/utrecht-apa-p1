@@ -38,8 +38,8 @@ topLevelDefs _ _ = [] --TODO, causes problems?
 defVars :: Canon.Def -> [Var.Canonical]
 defVars (Canon.Definition p _ _) = getPatternVars p
 
-oneLevelVars :: Env () -> Canon.Expr' -> [[Var.Canonical]] -> [Var.Canonical]
-oneLevelVars env ((Var v)) vars = [v] ++ (concat vars)
+oneLevelVars :: Env () -> Canon.Expr -> [[Var.Canonical]] -> [Var.Canonical]
+oneLevelVars env (A _ (Var v)) vars = [v] ++ (concat vars)
 oneLevelVars _ _ vars = concat vars
 
 referencedTopLevels :: (Env ()) -> Canon.Expr -> [Var.Canonical]
@@ -62,8 +62,11 @@ makeProgramInfo targets mods = ProgramInfo (eMap) allLabs labPairs isExtr
     labPairs = [(l,l') | l <- allLabs, l' <- eMap l]
     isExtr var = var `elem` targetVars
 
+transferFun :: Var -> IsReachable -> IsReachable
+transferFun _ r = r
+
 findReachable :: [Name] -> [(Name, Module)] -> Map.Map Var.Canonical IsReachable
-findReachable targets mods = snd $ minFP (latticeBottom :: IsReachable) id
+findReachable targets mods = snd $ minFP transferFun
                              $ makeProgramInfo targets mods
 
 --A variable can stay if it's not a TLD, or if it is reachable
