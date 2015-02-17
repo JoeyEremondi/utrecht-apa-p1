@@ -36,3 +36,8 @@ newtype Label = Label [Int]
   deriving (Eq, Ord, Show)
 
 type LabeledExpr = Expr (Region, Label, Env Label) (GenericDef (Region, Label, Env Label) Var) Var
+type LabeledExpr' = Expr' (Region, Label, Env Label) (GenericDef (Region, Label, Env Label) Var) Var
+
+--Basic getter for labels
+label :: LabeledExpr -> Label
+label (Annotate.A (_,a,_) _) = a
