@@ -22,10 +22,26 @@ data ControlNode =
   | GlobalExit --Always the last node
 
 
+functionName :: LabeledExpr -> Maybe Var
+functionName (A _ e) = case e of
+  Var v -> Just v
+  (App f _ ) -> functionName f
+  _ -> Nothing
+
+argsGiven :: LabeledExpr -> Maybe [LabeledExpr]
+argsGiven (A _ e) = case e of
+  Var v -> Just []
+  (App f e ) -> ([e]++) `fmap` argsGiven f
+  _ -> Nothing
+  
 --Generate control-flow edges for a single expression
 --We then pass this function to a fold, which collects them
-oneLevelEdges :: LabeledExpr -> Maybe [(ControlNode, ControlNode)]
-oneLevelEdges e@(A a e') =
+oneLevelEdges
+  :: Map.Map Var Int
+  -> Map.Map Var (ControlNode, ControlNode) --Map of entry and exit nodes
+  -> LabeledExpr
+  -> Maybe [(ControlNode, ControlNode)]
+oneLevelEdges aritys fnNodes e@(A (_,_,env) e') =
   case e' of
     (Range e1 e2) -> return [(Start e, Start e1), (End e1, Start e2), (End e2, End e)]
     (ExplicitList l) ->
@@ -35,7 +51,20 @@ oneLevelEdges e@(A a e') =
       in return $ zip startList endList
     (Binop op e1 e2) -> return [(Start e, Start e1), (End e1, Start e2), (End e2, End e)]
     (Lambda e1 e2) -> Nothing --TODO handle this case? Initial level?
-    (App e1 e2) -> error "TODO implement call edges"
+    (App e1 e2) -> do
+      fnName <- functionName e1
+      argList <- argsGiven e1
+      let numArgs = length argList
+      arity <- Map.lookup fnName aritys
+      let inLocalScope = Map.member fnName env
+      --TODO check for shadowing?
+      case (arity == numArgs, inLocalScope) of
+        (True, False) -> do
+          (pentry, pexit) <- Map.lookup fnName fnNodes
+          let starts = [Start e] ++ map Start argList
+          let ends = (map End argList) ++ [Call e]
+          return $ [(Call e, pentry), (pexit, Return e)] ++ (zip starts ends)
+        _ -> Nothing --If function is locally defined, or not fully instantiated, we fail
     (MultiIf guardCasePairs) ->
       let
         guards = map fst guardCasePairs
