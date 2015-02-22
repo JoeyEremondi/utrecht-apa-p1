@@ -17,6 +17,9 @@ import Optimize.Types
 newtype IsReachable = IsReachable {fromReachable :: Bool}
   deriving (Eq, Ord)
 
+reachingJoin :: IsReachable -> IsReachable -> IsReachable
+reachingJoin a b = IsReachable (fromReachable a || fromReachable b )
+
 {-|
 A simple reachability test.
 When we use this lattice, our worklist algorithm basically
@@ -24,11 +27,15 @@ becomes a depth-first search on a graph,
 returning a boolean for each label for whether it is reachable
 from our initial extremal values
 |-}
-instance Lattice IsReachable where
-  latticeBottom = IsReachable False
-  latticeJoin a b = IsReachable (fromReachable a || fromReachable b )
-  iota = IsReachable True
-  lleq a b = (latticeJoin a b) == b
+isReachableLattice :: Lattice IsReachable
+--instance Lattice IsReachable where
+isReachableLattice = Lattice {
+  latticeBottom = IsReachable False,
+  latticeJoin = reachingJoin,
+  iota = IsReachable True,
+  lleq = \a b -> (reachingJoin a b) == b,
+  flowDirection = ForwardAnalysis
+  }
 
 topLevelDefs :: Name -> Canon.Expr -> [(Var.Canonical,Canon.Expr)]
 topLevelDefs name (A _ (Let defs _))=
@@ -38,7 +45,7 @@ topLevelDefs _ _ = [] --TODO, causes problems?
 defVars :: Canon.Def -> [Var.Canonical]
 defVars (Canon.Definition p _ _) = getPatternVars p
 
-oneLevelVars :: Env () -> Canon.Expr -> [[Var.Canonical]] -> [Var.Canonical]
+oneLevelVars :: Env () -> Canon.Expr  -> [[Var.Canonical]] -> [Var.Canonical]
 oneLevelVars env (A _ (Var v)) vars = [v] ++ (concat vars)
 oneLevelVars _ _ vars = concat vars
 
@@ -62,11 +69,11 @@ makeProgramInfo targets mods = ProgramInfo (eMap) allLabs labPairs isExtr
     labPairs = [(l,l') | l <- allLabs, l' <- eMap l]
     isExtr var = var `elem` targetVars
 
-transferFun :: Var -> IsReachable -> IsReachable
+transferFun :: FlowEdge Var -> IsReachable -> IsReachable
 transferFun _ r = r
 
 findReachable :: [Name] -> [(Name, Module)] -> Map.Map Var.Canonical IsReachable
-findReachable targets mods = snd $ minFP transferFun
+findReachable targets mods = snd $ minFP isReachableLattice transferFun
                              $ makeProgramInfo targets mods
 
 --A variable can stay if it's not a TLD, or if it is reachable
@@ -106,3 +113,5 @@ removeUnreachableModule name@(Name nlist) modul =
     inMap = Map.fromList [(name, modul)]
 
   in snd $ head $ Map.toList $ removeUnreachable targets inMap
+
+

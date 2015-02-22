@@ -35,8 +35,11 @@ data GenericDef a v = GenericDef Pattern (Expr a (GenericDef a v) v) (Maybe Cano
 newtype Label = Label [Int]
   deriving (Eq, Ord, Show)
 
-type LabeledExpr = Expr (Region, Label, Env Label) (GenericDef (Region, Label, Env Label) Var) Var
-type LabeledExpr' = Expr' (Region, Label, Env Label) (GenericDef (Region, Label, Env Label) Var) Var
+type AExpr a = Expr a (GenericDef a Var) Var
+type AExpr' a = Expr' a (GenericDef a Var) Var
+
+type LabeledExpr = AExpr (Region, Label, Env Label)
+type LabeledExpr' = AExpr (Region, Label, Env Label)
 
 --Basic getter for labels
 label :: LabeledExpr -> Label

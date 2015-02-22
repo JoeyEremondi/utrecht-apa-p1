@@ -11,6 +11,7 @@ import AST.Annotation (Annotated(..))
 import AST.Expression.General
 import Control.Monad
 import qualified Data.List as List
+import qualified Data.Set as Set
 
 
 import Optimize.Types
@@ -182,3 +183,69 @@ makeProgramInfo edgeList = let
     isExtremal (GlobalEntry) = True
     isExtremal _ = False --TODO entry or exit? Forward or backward?
   in ProgramInfo edgeFn allLabels labelEdges isExtremal
+
+killSet
+  :: Map.Map Label LabeledExpr 
+  -> Label
+  -> [Label]
+killSet exprs label = error "TODO kill"
+
+genSet
+  :: Map.Map Label LabeledExpr 
+  -> Label
+  -> [Label]
+genSet exprs label = error "TODO gen"
+
+newtype DirectRelevantVars = DirectRelevantVars (Set.Set Label)
+                      deriving (Eq, Ord)
+
+--TODO check this
+directRelevantVars :: Set.Set Label -> Lattice DirectRelevantVars
+directRelevantVars iotaVal =  Lattice {
+  latticeBottom = DirectRelevantVars (Set.empty),
+  latticeJoin  = (\(DirectRelevantVars l1) ((DirectRelevantVars l2)) ->
+    DirectRelevantVars (l1 `Set.union` l2)),
+  iota = DirectRelevantVars iotaVal,
+  lleq = \(DirectRelevantVars l1) (DirectRelevantVars l2) ->
+    l1 `Set.isSubsetOf` l2,
+  flowDirection = BackwardAnalysis
+  }
+
+--The variables referenced or "killed" in a given expression
+expRefs :: LabeledExpr -> [Var]
+expRefs =
+  foldE
+  (extendEnv genericDefVars (\_ -> ()))
+  Map.empty
+  (\(GenericDef _ exp _) -> [exp])
+  (\env (A _ exp) vars -> case exp of
+       Var v -> (if (Map.member v env) then [v]  else []) ++ (concat vars)
+       _ -> concat vars
+       )
+  
+refs :: Map.Map Label LabeledExpr -> Label -> [Var]
+refs m = expRefs . (m Map.!)
+
+--The variables defined, or "generated", by the given expression
+expGens :: LabeledExpr -> [Var]
+expGens =
+  foldE
+  (extendEnv genericDefVars (\_ -> ()))
+  Map.empty
+  (\(GenericDef _ exp _) -> [exp])
+  (\env (A _ exp) vars -> case exp of
+       Let defs _ -> (concatMap (\(GenericDef pat _ _) -> getPatternVars pat) defs ) ++ (concat vars)
+       _ -> concat vars
+       )
+  
+gens :: Map.Map Label LabeledExpr -> Label -> [Var]
+gens m = expGens . (m Map.!)
+
+genericDefVars :: GenericDef a Var -> [Var]
+genericDefVars (GenericDef p _ _) = getPatternVars p
+
+--Transfer function for reaching definitions, we find the fixpoint for this
+transferFun :: Map.Map Label LabeledExpr -> Label -> DirectRelevantVars -> DirectRelevantVars
+transferFun labMap label payload = error "TODO transfer fun"
+  --payload `latticeJoin` (DirectRelevantVars [])
+

@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 --Joseph Eremondi UU# 4229924
 --Utrecht University, APA 2015
 --Project one: dataflow analysis
@@ -15,6 +16,10 @@ import qualified Data.Array as Array
 --Wrapper for a control flow graph
 newtype CFG block = CFG (Set.Set (block, block))
 
+newtype FlowEdge label = FlowEdge (label, label)
+
+data AnalysisDirection = ForwardAnalysis | BackwardAnalysis
+
 data ProgramInfo label = ProgramInfo {
   edgeMap :: label -> [label],
   --labelRange :: (label, label),
@@ -24,31 +29,38 @@ data ProgramInfo label = ProgramInfo {
   
   }
 
+getFlowEdge :: AnalysisDirection -> (label,label) -> FlowEdge label
+getFlowEdge ForwardAnalysis e = FlowEdge e
+getFlowEdge BackwardAnalysis (l1, l2) = FlowEdge (l2, l1)
+
+
 incoming :: (Ord block) => CFG block -> block -> Set.Set block
 incoming (CFG controlFlow) l = Set.map snd $ Set.filter ((== l) . fst) controlFlow
 
-class (Ord a, Eq a) => Lattice a where
+data Lattice a = Lattice {
   --latticeTop :: a
-  latticeBottom :: a
-  latticeJoin :: a -> a -> a
-  iota :: a --Extremal value for our analysis
-  lleq :: a -> a -> Bool
+  latticeBottom :: a,
+  latticeJoin :: a -> a -> a,
+  iota :: a, --Extremal value for our analysis
+  lleq :: a -> a -> Bool,
+  flowDirection :: AnalysisDirection
+  }
 
 
-
-joinAll :: (Lattice a) => Set.Set a -> a
-joinAll = Set.foldr latticeJoin latticeBottom
+joinAll :: (Ord a) => (Lattice a) -> Set.Set a -> a
+joinAll Lattice{..} = Set.foldr latticeJoin latticeBottom
 
 --worklist algo for least fixed point
 --We don't actually need to pass in bottom, but it helps the typechecker
 --figure out which lattice we're using
-minFP :: (Lattice payload, Ord label) =>
-         (label -> payload -> payload)
+minFP :: (Ord label) =>
+         Lattice payload 
+         -> (FlowEdge label -> payload -> payload)
          -> ProgramInfo label
          -> (Map.Map label payload, Map.Map label payload) 
-minFP f info = (mfpOpen, mfpClosed)
+minFP Lattice{..} f info = (mfpOpen, error "TODO closed in edge-framework?" {-mfpClosed-})
   where
-    mfpClosed = Map.mapWithKey f mfpOpen
+    --mfpClosed = Map.mapWithKey f mfpOpen
     --stResult :: ST s [(label, payload)]
     initialSolns = foldr (\l solnsSoFar ->
                              if isExtremal info l
@@ -57,14 +69,16 @@ minFP f info = (mfpOpen, mfpClosed)
                            ) Map.empty (allLabels info)
     mfpOpen = iterateSolns initialSolns (labelPairs info)
     iterateSolns currentSolns [] = currentSolns
-    iterateSolns currentSolns ((l,l'):rest) = let
+    iterateSolns currentSolns (cfgEdge:rest) = let
+      flowEdge = getFlowEdge flowDirection cfgEdge
+      (FlowEdge (l,l')) = flowEdge 
       al = currentSolns Map.! l
       al' = currentSolns Map.! l'
-      fal = f l al
+      fal = f flowEdge al
       (newPairs, newSolns) =
         if (fal `lleq` al') 
         then let
-            theMap = Map.empty --Map.insert l' (join al' fal) currentSolns
+            theMap = Map.insert l' (latticeJoin al' fal) currentSolns
             thePairs = map (\lNeighbour -> (l', lNeighbour) ) $ edgeMap info l'
           in (thePairs, theMap)
         else ([], currentSolns)
