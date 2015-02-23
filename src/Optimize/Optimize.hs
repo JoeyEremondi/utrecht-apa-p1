@@ -9,7 +9,7 @@ import qualified Elm.Compiler.Module as PublicModule
 import qualified AST.Variable as Var
 
 import qualified Optimize.Reachability as Reachability
-import qualified Optimize.ForwardSlicing as ForwardSlicing
+--import qualified Optimize.RelevantDefs as RelevantDefs
 
 type WholeProgOptFun = 
   [PublicModule.Name] 
@@ -34,9 +34,10 @@ optimizeModule name initialMod =  foldr (\f modDict -> f name modDict) initialMo
 
 wholeProgOpts :: [WholeProgOptFun]
 wholeProgOpts = [Reachability.removeUnreachable
-                 , ForwardSlicing.removeDeadCodeWP
+                 --, RelevantDefs.removeDeadCodeWP
           ]
 
 moduleOpts :: [ModuleOptFun]
 moduleOpts = [Reachability.removeUnreachableModule
-             , ForwardSlicing.removeDeadCodeModule ]
+             --, RelevantDefs.removeDeadCodeModule
+             ]

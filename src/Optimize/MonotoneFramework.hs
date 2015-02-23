@@ -53,14 +53,17 @@ joinAll Lattice{..} = Set.foldr latticeJoin latticeBottom
 --worklist algo for least fixed point
 --We don't actually need to pass in bottom, but it helps the typechecker
 --figure out which lattice we're using
-minFP :: (Ord label) =>
+minFP :: (Ord label, Ord payload) =>
          Lattice payload 
          -> (FlowEdge label -> payload -> payload)
          -> ProgramInfo label
          -> (Map.Map label payload, Map.Map label payload) 
-minFP Lattice{..} f info = (mfpOpen, error "TODO closed in edge-framework?" {-mfpClosed-})
+minFP lat@(Lattice{..}) f info = (mfpOpen, error "TODO closed in edge-framework?" {-mfpClosed-})
   where
-    --mfpClosed = Map.mapWithKey f mfpOpen
+    mfpClosed = Map.mapWithKey
+                (\l al ->
+                  joinAll lat $ 
+                  Set.fromList [f (FlowEdge (l, l')) al | l' <- (edgeMap info l)]) mfpOpen
     --stResult :: ST s [(label, payload)]
     initialSolns = foldr (\l solnsSoFar ->
                              if isExtremal info l

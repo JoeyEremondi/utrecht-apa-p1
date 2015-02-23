@@ -105,7 +105,7 @@ Library
         Optimize.MonotoneFramework,
         Optimize.Traversals,
         Optimize.Optimize,
-        Optimize.ForwardSlicing,
+        Optimize.RelevantDefs,
         Optimize.Reachability,
         Paths_elm_compiler
 

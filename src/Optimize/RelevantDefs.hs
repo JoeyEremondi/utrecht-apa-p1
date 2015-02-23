@@ -1,5 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
-module Optimize.ForwardSlicing (removeDeadCodeWP, removeDeadCodeModule) where
+module Optimize.RelevantDefs (removeDeadCodeWP, removeDeadCodeModule) where
 
 import Elm.Compiler.Module
 import qualified Data.Map as Map
