@@ -1,22 +1,22 @@
 {-# LANGUAGE DeriveFunctor #-}
 module Optimize.RelevantDefs (removeDeadCodeWP, removeDeadCodeModule) where
 
-import Elm.Compiler.Module
-import qualified Data.Map as Map
-import Optimize.Traversals
-import qualified AST.Module as Module
-import qualified AST.Pattern as Pattern
-import qualified AST.Expression.Canonical as Canon
-import AST.Annotation (Annotated(..))
-import AST.Expression.General
-import Control.Monad
-import qualified Data.List as List
-import qualified Data.Set as Set
+import           AST.Annotation             (Annotated (..))
+import qualified AST.Expression.Canonical   as Canon
+import           AST.Expression.General
+import qualified AST.Module                 as Module
+import qualified AST.Pattern                as Pattern
+import           Control.Monad
+import qualified Data.List                  as List
+import qualified Data.Map                   as Map
+import qualified Data.Set                   as Set
+import           Elm.Compiler.Module
+import           Optimize.Traversals
 
 
-import Optimize.Types
-import Optimize.Environment
-import Optimize.MonotoneFramework
+import           Optimize.Environment
+import           Optimize.MonotoneFramework
+import           Optimize.Types
 
 --Our different types of control nodes
 data ControlNode' expr =
@@ -54,7 +54,7 @@ argsGiven (A _ e) = case e of
   Var v -> Just []
   (App f e ) -> ([e]++) `fmap` argsGiven f
   _ -> Nothing
-  
+
 --Generate control-flow edges for a single expression
 --We then pass this function to a fold, which collects them
 oneLevelEdges
@@ -95,7 +95,7 @@ oneLevelEdges aritys fnNodes e@(A (_,_,env) e') =
         --TODO does flow go from each guard to next, or from whole to each guard
       in return $ innerEdges ++ (zip starts ends)
     (Let e1 e2) -> error "TODO implement cases for let expressions"
-    (Case e1 cases) -> return $ 
+    (Case e1 cases) -> return $
       [(Start e, Start e1)] ++
       concatMap (\(_pat, e2) -> [(End e1, Start e2), (End e2, Start e)]) cases
     (Data ctor args) -> let
@@ -110,7 +110,7 @@ oneLevelEdges aritys fnNodes e@(A (_,_,env) e') =
         exprs = map snd newVals
         starts = [Start e] ++ map Start exprs
         ends = (map End exprs) ++ [End e]
-        
+
       in return $ zip starts ends
     (Record nameExprs) ->
       let
@@ -136,11 +136,9 @@ allExprEdges aritys fnNodes = foldE
                subEdges <- sequence maybeSubs
                return $ thisLevel ++ (concat subEdges))
 
-
-
-removeDeadCodeWP :: [Name] 
+removeDeadCodeWP :: [Name]
   -> Map.Map Name (Module, Interface)
-  -> Map.Map Name (Module, Interface) 
+  -> Map.Map Name (Module, Interface)
 removeDeadCodeWP _ m = m --TODO implement
 
 
@@ -185,13 +183,13 @@ makeProgramInfo edgeList = let
   in ProgramInfo edgeFn allLabels labelEdges isExtremal
 
 killSet
-  :: Map.Map Label LabeledExpr 
+  :: Map.Map Label LabeledExpr
   -> Label
   -> [Label]
 killSet exprs label = error "TODO kill"
 
 genSet
-  :: Map.Map Label LabeledExpr 
+  :: Map.Map Label LabeledExpr
   -> Label
   -> [Label]
 genSet exprs label = error "TODO gen"
@@ -222,7 +220,7 @@ expRefs =
        Var v -> (if (Map.member v env) then [v]  else []) ++ (concat vars)
        _ -> concat vars
        )
-  
+
 refs :: Map.Map Label LabeledExpr -> Label -> [Var]
 refs m = expRefs . (m Map.!)
 
@@ -237,7 +235,7 @@ expGens =
        Let defs _ -> (concatMap (\(GenericDef pat _ _) -> getPatternVars pat) defs ) ++ (concat vars)
        _ -> concat vars
        )
-  
+
 gens :: Map.Map Label LabeledExpr -> Label -> [Var]
 gens m = expGens . (m Map.!)
 
