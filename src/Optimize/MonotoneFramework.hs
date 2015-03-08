@@ -6,12 +6,12 @@
 module Optimize.MonotoneFramework where
 
 import qualified Data.Set as Set
-import Data.Ix
-import Data.Array.ST
-import Control.Monad
-import Control.Monad.ST
+--import Data.Ix
+--import Data.Array.ST
+--import Control.Monad
+--import Control.Monad.ST
 import qualified Data.Map as Map
-import qualified Data.Array as Array
+--import qualified Data.Array as Array
 
 --Wrapper for a control flow graph
 newtype CFG block = CFG (Set.Set (block, block))

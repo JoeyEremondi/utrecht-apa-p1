@@ -2,13 +2,8 @@
 module Optimize.EmbellishedMonotone where
 
 import Optimize.MonotoneFramework
+import Optimize.Types
 
-data FnLabel l =
-  FnCall l
-  | FnReturn l
-  | FnEnter l
-  | FnExit l
-  | Intra l
 
 liftJoin :: Lattice payload -> (d -> payload) -> (d -> payload) -> (d -> payload)
 liftJoin lat = \x y d -> (latticeJoin lat) (x d) (y d)
@@ -42,6 +37,6 @@ liftToFn Lattice{..} _f fcall fret (FnCall l) =
                then fcall lc (lhat d')
                else error "Call with invalid top elem"
     
-liftToFn _ _f fcall fret (FnReturn l) =_ --TODO same label call and return?
+liftToFn _ _f fcall fret (FnReturn l) = error "TODO return emb" --TODO same label call and return?
 liftToFn _ _f fcall fret (FnEnter l) = id
 liftToFn _ _f fcall fret (FnExit l) = id 

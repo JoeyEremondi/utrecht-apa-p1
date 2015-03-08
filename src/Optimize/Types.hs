@@ -39,8 +39,17 @@ type AExpr a = Expr a (GenericDef a Var) Var
 type AExpr' a = Expr' a (GenericDef a Var) Var
 
 type LabeledExpr = AExpr (Region, Label, Env Label)
-type LabeledExpr' = AExpr (Region, Label, Env Label)
+type LabeledExpr' = AExpr' (Region, Label, Env Label)
 
+type InterExpr = AExpr (Region, FnLabel Label, Env Label) 
+
+data FnLabel l =
+  FnCall l
+  | FnReturn l
+  | FnEnter l
+  | FnExit l
+  | Intra l
+                        
 --Basic getter for labels
 label :: LabeledExpr -> Label
 label (Annotate.A (_,a,_) _) = a
