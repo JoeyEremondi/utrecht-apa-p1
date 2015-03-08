@@ -29,7 +29,10 @@ type Env l = (Map.Map (Var ) l)
 type CanonEnv = Env Var.Canonical
 
 
-data GenericDef a v = GenericDef Pattern (Expr a (GenericDef a v) v) (Maybe CanonicalType) 
+data GenericDef a v = GenericDef {
+  defPat :: Pattern,
+  defBody :: (Expr a (GenericDef a v) v),
+  defType:: (Maybe CanonicalType) }
 
 --TODO move to better place
 newtype Label = Label [Int]
