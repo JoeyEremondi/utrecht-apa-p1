@@ -26,10 +26,11 @@ insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs
 data VarPlus =
   NormalVar [Var]
   | IntermedExpr Label
-  | ReturnVal Label
+  | FormalReturn Var
   | ActualParam Label
   | FormalParam Pattern Label
     deriving (Eq, Ord)
+--TODO how to make sure all our IntermedExprs are there?
 
 --Our different types of control nodes
 data ControlNode' expr =
@@ -37,7 +38,7 @@ data ControlNode' expr =
   | Assign VarPlus (expr)
   -- | AssignParam (expr)
   | Call (expr) 
-  | Return (expr) --TODO assign to what?
+  | Return Var (expr) --TODO assign to what?
   | ProcEntry (expr)
   | ProcExit (expr)
   | GlobalEntry --Always the first node
@@ -78,6 +79,17 @@ binOpToFn (A ann (Binop op _ _)) = A ann $ Var op
 connectLists :: ([ControlNode], [ControlNode]) -> [ControlEdge]
 connectLists (l1, l2) = [(n1, n2) | n1 <- l1, n2 <- l2]
 
+data FunctionInfo =
+  FunctionInfo
+  {
+    arity :: Int,
+    formalParams :: [VarPlus],
+    entryNode :: ControlNode,
+    exitNode :: ControlNode
+  }
+
+    
+
 --Used in a foldE to generate statements/control nodes for expressions that need one
 --Later we'll go in and add control edges
 oneLevelEdges
@@ -110,7 +122,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
       let inLocalScope = Map.member fnName env
       let argNodes = paramNodes argList
       let callNode = Call e
-      let retNode = Return e
+      let retNode = Return fnName e
       --Generate assignment nodes for the actual parameters to the formals
       let assignFormalNodes =
             map (\(formal, arg) -> Assign formal arg) $ zip (formalParams thisFunInfo) argList
@@ -124,7 +136,11 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
       let gotoFormalEdges = connectLists ((last argNodes), [head assignFormalNodes])
 
       let assignFormalEdges = zip (init assignFormalNodes) (tail assignFormalNodes)
-      let gotoCallEdges = [(last assignFormalNodes, callNode )]
+      let callEdges = [(last assignFormalNodes, callNode ),
+                      (callNode, entryNode thisFunInfo)]
+      let returnEdges =
+            [ (exitNode thisFunInfo, retNode)
+            ]
       
       --TODO add edges to function entry, assigning formals
       --TODO check for shadowing?
@@ -134,7 +150,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
                          Map.insert (getLabel e) [retNode] tailMap,
                           --[callNode, retNode] ++ (concat argNodes),
                          assignParamEdges ++ calcNextParamEdges ++
-                           gotoFormalEdges ++ gotoCallEdges ++ subEdges ) --TODO app edges
+                           gotoFormalEdges ++ callEdges ++
+                           callEdges ++ returnEdges ++ subEdges ) --TODO app edges
           
         _ -> Nothing --If function is locally defined, or not fully instantiated, we fail
     Lambda _ _ -> Nothing --Fail for local lambda defs --TODO lambda case?
@@ -150,7 +167,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
       let guards = (map fst condCasePairs) 
       let bodies = map snd condCasePairs
       let bodyTails = concatMap tailExprs bodies
-      let guardNodes = paramNodes guards
+      let guardNodes = map Branch guards
       let bodyNodes = map (tailAssign $ getLabel e) bodyTails
       --Each guard is connected to the next guard, and the "head" control node of its body
       let ourHead = headMap Map.! (getLabel $ head guards)
@@ -173,11 +190,13 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
       --Those assignments correspond to the expressions in tail-position of the case
       let cases = map snd patCasePairs
       let caseNodes = map (\tailExpr -> Assign (IntermedExpr $ getLabel e) tailExpr) cases
+      let branchNode = Branch e
       let ourHead = case (headMap Map.! (getLabel caseExpr)) of
             [] -> [Assign (IntermedExpr $ getLabel caseExpr) caseExpr]
             headList -> headList
       let caseHeads = concatMap (\cs -> headMap Map.! (getLabel cs) ) cases
-      let caseEdges =  connectLists (ourHead, caseHeads)
+      let branchEdges = connectLists (ourHead, [branchNode])
+      let caseEdges =  connectLists ([branchNode], caseHeads)
       return $ (Map.insert (getLabel e) ourHead headMap
         ,Map.insert (getLabel e) caseNodes tailMap --Last thing is tail statement of whichever case we take
         --,[Assign (IntermedExpr $ getLabel caseExpr) caseExpr] ++ caseNodes ++ subNodes
@@ -187,9 +206,9 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
       --the let statement
       --Those assignments correspond to the expressions in tail-position of the body
       let orderedDefs = defs --TODO sort these
-      let getDefAssigns (GenericDef pat body _) = map (varAssign pat) $ tailExprs body
+      let getDefAssigns (GenericDef pat b _) = map (varAssign pat) $ tailExprs b
       let defAssigns = map getDefAssigns orderedDefs
-      let bodyAssigns = map (tailAssign $ getLabel e) $ tailExprs body
+      --let bodyAssigns = map (tailAssign $ getLabel e) $ tailExprs body
 
       let allHeads = map (\(GenericDef _ b _) -> headMap Map.! (getLabel b)) orderedDefs
       
@@ -197,12 +216,9 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
             [] -> head defAssigns
             headList -> headList
       let otherHeads = tail allHeads
-
-       
       --TODO separate variables?
 
       let bodyHead = headMap Map.! (getLabel body)
-      
       let tailLists = map (tailMap Map.!) $map (\(GenericDef _ b _) -> getLabel b) orderedDefs
       
       
@@ -236,19 +252,6 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
 varAssign :: Pattern -> LabeledExpr -> ControlNode
 varAssign pat e = Assign (NormalVar $ getPatternVars pat) e
 
---type InterNode = ControlNode' (FnLabel Label)
-
-{-
-toInterNode :: LabelNode -> InterNode
-toInterNode (Call l) = Call $ FnCall l
-toInterNode (Return l) = Return $ FnReturn l
-toInterNode (ProcEntry l) = ProcEntry $ FnEnter l
-toInterNode (ProcExit l) = ProcEntry (FnExit l)
-toInterNode (Start l) = Start $ Intra l 
-toInterNode (End l) = End $ Intra l
-toInterNode GlobalEntry = GlobalEntry
-toInterNode GlobalExit = GlobalExit
--}
 
 functionName :: LabeledExpr -> Maybe Var
 functionName (A _ e) = case e of
@@ -274,85 +277,7 @@ argsGiven (A _ e) = case e of
   (App f e ) -> ([e]++) `fmap` argsGiven f
   _ -> Nothing
 
-{-
---Generate control-flow edges for a single expression
---We then pass this function to a fold, which collects them
-oneLevelEdges
-  :: Map.Map Var Int
-  -> Map.Map Var (ControlNode, ControlNode) --Map of entry and exit nodes
-  -> LabeledExpr
-  -> Maybe [ControlEdge]
-oneLevelEdges aritys fnNodes e@(A (_,_,env) e') =
-  case e' of
-    (Range e1 e2) -> return [(Start e, Start e1), (End e1, Start e2), (End e2, End e)]
-    (ExplicitList l) ->
-      let
-        startList = [Start e] ++ map Start l
-        endList = (map End l) ++ [End e]
-      in return $ zip startList endList
-    (Binop op e1 e2) -> return [(Start e, Start e1), (End e1, Start e2), (End e2, End e)]
-    (Lambda e1 e2) -> Nothing --TODO handle this case? Initial level?
-    (App e1 e2) -> do
-      fnName <- functionName e1
-      argList <- argsGiven e1
-      let numArgs = length argList
-      arity <- Map.lookup fnName aritys
-      let inLocalScope = Map.member fnName env
-      --TODO check for shadowing?
-      case (arity == numArgs, inLocalScope) of
-        (True, False) -> do
-          (pentry, pexit) <- Map.lookup fnName fnNodes
-          let starts = [Start e] ++ map Start argList
-          let ends = (map End argList) ++ [Call e]
-          return $ [(Call e, pentry), (pexit, Return e)] ++ (zip starts ends)
-        _ -> Nothing --If function is locally defined, or not fully instantiated, we fail
-    (MultiIf guardCasePairs) ->
-      let
-        guards = map fst guardCasePairs
-        starts = [Start e] ++ (map Start guards)
-        ends = (map End guards) ++ [End e] --TODO go to failure case?
-        innerEdges = concatMap (\(g, c) -> [(End g, Start c), (End c, End e)]) guardCasePairs
-        --TODO does flow go from each guard to next, or from whole to each guard
-      in return $ innerEdges ++ (zip starts ends)
-    (Let e1 e2) -> error "TODO implement cases for let expressions"
-    (Case e1 cases) -> return $
-      [(Start e, Start e1)] ++
-      concatMap (\(_pat, e2) -> [(End e1, Start e2), (End e2, Start e)]) cases
-    (Data ctor args) -> let
-        startList = [Start e] ++ map Start args
-        endList = (map End args) ++ [End e]
-      in return $ zip startList endList
-    (Access e1 _) -> return $ [(Start e, Start e1), (End e1, End e)]
-    (Remove e1 _) -> return $ [(Start e, Start e1), (End e1, End e)]
-    (Insert e1 _ e2) -> return $ [(Start e, Start e1), (End e1, Start e2), (End e2, End e)]
-    (Modify e1 newVals) ->
-      let
-        exprs = map snd newVals
-        starts = [Start e] ++ map Start exprs
-        ends = (map End exprs) ++ [End e]
 
-      in return $ zip starts ends
-    (Record nameExprs) ->
-      let
-        exprs = map snd nameExprs
-        starts = [Start e] ++ map Start exprs
-        ends = (map End exprs) ++ [End e]
-      in return $ zip starts ends
-    (PortIn e1 e2) -> return []
-    (PortOut _ _ e1) -> return $ [(Start e, Start e1), (End e1, End e)]
-    (GLShader _ _ _ ) -> return []
--}
-
-data FunctionInfo =
-  FunctionInfo
-  {
-    arity :: Int,
-    formalParams :: [VarPlus],
-    entryNode :: ControlNode,
-    exitNode :: ControlNode
-  }
-
-    
 
 allExprEdges
   :: Map.Map Var FunctionInfo
@@ -405,7 +330,7 @@ makeProgramInfo edgeList = let
     isExtremal _ = False --TODO entry or exit? Forward or backward?
   in ProgramInfo edgeFn allLabels labelEdges isExtremal
 
-type RDef = (Var, Maybe Label) 
+type RDef = (VarPlus, Maybe Label) 
 
 newtype ReachingDefs = ReachingDefs (Set.Set RDef)
                       deriving (Eq, Ord)
@@ -421,66 +346,27 @@ reachingDefs iotaVal =  Lattice {
     l1 `Set.isSubsetOf` l2,
   flowDirection = BackwardAnalysis
   }
-{-
---The variables referenced or "killed" in a given expression
-expRefs :: LabeledExpr -> [Var]
-expRefs =
-  foldE
-  (extendEnv genericDefVars (\_ -> ()))
-  Map.empty
-  (\(GenericDef _ exp _) -> [exp])
-  (\env (A _ exp) vars -> case exp of
-       Var v -> (if (Map.member v env) then [v]  else []) ++ (concat vars)
-       _ -> concat vars
-       )
 
-refs :: Map.Map Label LabeledExpr -> Label -> [Var]
-refs m = expRefs . (m Map.!)
--}
+removeKills (Assign var label) aIn = Set.filter (not . isKilled) aIn
+  where isKilled (setVar, setLab) = (setVar == var)
+--Return is a special case, because there's an implicit unnamed variable we write to
+removeKills (Return fnVar label) aIn = Set.filter (not . isKilled) aIn
+  where isKilled (setVar, setLab) = (setVar == IntermedExpr label)
+removeKills _ aIn = aIn
 
-expKills :: LabeledExpr -> [RDef]
-expKills =
-  foldE
-  (extendEnv genericDefVars (\(A (_,l,_ ) _) -> l))
-  Map.empty
-  (\(GenericDef _ exp _) -> [exp])
-  (\env (A _ exp) vars -> case exp of
-       Var v ->
-         (if (Map.member v env) then [(v, Map.lookup v env)]  else []) ++ (concat vars)
-       _ -> concat vars
-       )
-{-
-kills :: Map.Map Label LabeledExpr -> LabelNode -> [RDef]
-kills theMap (Start node) = _kills_body
-kills theMap (End node) =_kills_body
-kills theMap (Call node) =_kills_body
-kills theMap (Return node) =_kills_body
-kills theMap (ProcEntry node) =_kills_body
-kills theMap (ProcExit node) =_kills_body
-kills theMap GlobalEntry =_kills_body
-kills theMap GlobalExit =_kills_body
--}
+--TODO special case for return in ref-set
 
---The variables defined, or "generated", by the given expression
-expGens :: LabeledExpr -> [Var]
-expGens =
-  foldE
-  (extendEnv genericDefVars (\_ -> ()))
-  Map.empty
-  (\(GenericDef _ exp _) -> [exp])
-  (\env (A _ exp) vars -> case exp of
-       Let defs _ -> (concatMap (\(GenericDef pat _ _) -> getPatternVars pat) defs ) ++ (concat vars)
-       _ -> concat vars
-       )
+gens :: LabelNode -> Set.Set RDef
+gens (Assign var label) = Set.singleton (var, Just label)
+gens _ = Set.empty
 
-gens :: Map.Map Label LabeledExpr -> Label -> [Var]
-gens m = expGens . (m Map.!)
+
+
+--Transfer function for reaching definitions, we find the fixpoint for this
+transferFun :: Map.Map Label LabeledExpr -> LabelNode -> ReachingDefs -> ReachingDefs
+transferFun labMap cfgNode (ReachingDefs aIn) =
+  ReachingDefs $ (removeKills cfgNode aIn) `Set.union` (gens cfgNode)
+
 
 genericDefVars :: GenericDef a Var -> [Var]
 genericDefVars (GenericDef p _ _) = getPatternVars p
-
---Transfer function for reaching definitions, we find the fixpoint for this
-transferFun :: Map.Map Label LabeledExpr -> Label -> ReachingDefs -> ReachingDefs
-transferFun labMap label payload = error "TODO transfer fun"
-  --payload `latticeJoin` (DirectRelevantVars [])
-
