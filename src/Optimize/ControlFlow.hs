@@ -42,6 +42,14 @@ data ControlNode' expr =
     deriving (Functor, Eq, Ord)
 
 
+getNodeLabel :: (ControlNode' expr) -> expr
+getNodeLabel (Branch n) = n
+getNodeLabel (Assign _ n2) = n2
+getNodeLabel (Call n) = n
+getNodeLabel (Return _ n2) = n2
+getNodeLabel (ProcEntry n) = n
+getNodeLabel (ProcExit n) = n
+
 data FunctionInfo =
   FunctionInfo
   {

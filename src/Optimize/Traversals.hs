@@ -1,4 +1,4 @@
-{-# LANGUAGE StandaloneDeriving, DeriveFunctor #-}
+{-# LANGUAGE StandaloneDeriving, DeriveFunctor, FlexibleInstances #-}
 module Optimize.Traversals where
 
 import Optimize.Environment
@@ -210,3 +210,34 @@ tformModule f m =
     expr = Module.program $ body
     newBody = body {Module.program = f expr}
   in m {Module.body = newBody} --TODO more cleanup to be done?
+
+
+
+expContainsVar :: LabeledExpr -> Var -> Bool
+expContainsVar e v =
+  foldE
+  (\_ () -> repeat () )
+  ()
+  (\(GenericDef _ e v) -> [e])
+  (\ _ (A _ expr) subContains ->
+    (or subContains) || case expr of
+      Var vexp -> v == vexp
+      _ -> False) e
+  
+expContainsLabel :: LabeledExpr -> Label -> Bool
+expContainsLabel e lin =
+  foldE
+  (\_ () -> repeat () )
+  ()
+  (\(GenericDef _ e v) -> [e])
+  (\ _ (A (_,lExp,_) _) subContains ->
+    (or subContains) || (lExp == lin ) ) e
+
+labelDict :: LabeledExpr -> Map.Map Label LabeledExpr
+labelDict =
+  foldE
+  (\ _ () -> repeat ())
+  ()
+  (\(GenericDef _ e v) -> [e])
+  (\ _ e@(A (_,lExp,_) _) subDicts ->
+    Map.insert lExp e $ Map.unions subDicts)

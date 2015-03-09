@@ -6,6 +6,7 @@ import qualified AST.Expression.Canonical   as Canon
 import           AST.Expression.General
 import qualified AST.Module                 as Module
 import qualified AST.Pattern                as Pattern
+import qualified AST.Variable as Variable
 import           Control.Monad
 import qualified Data.List                  as List
 import qualified Data.Map                   as Map
@@ -36,7 +37,8 @@ getFreeVars nodes = Set.toList $ foldr (
   ) Set.empty nodes
 
     
-
+nameToCanonVar :: String -> Var
+nameToCanonVar name = Variable.Canonical  Variable.Local name
 
 --Give the list of definitions  
 getRelevantDefs
@@ -45,12 +47,13 @@ getRelevantDefs
   -> Maybe (Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)))
 getRelevantDefs targets e =
   let
-    eAnn = annotateCanonical (error "TODO initial global env")  (Label []) e
+    eAnn = annotateCanonical (Map.empty)  (Label []) e
+    expDict = labelDict eAnn
     initalEnv = globalEnv eAnn
     (A _ (Let defs _)) = eAnn
     fnInfo =
       foldr (\(GenericDef (Pattern.Var n) body _ ) finfo ->
-              Map.insert (error "TODO name to var")
+              Map.insert (nameToCanonVar n)
               (FunctionInfo
                (getArity body)
                (map (\pat -> FormalParam pat (getLabel body) ) (functionArgPats body)) 
@@ -72,17 +75,24 @@ getRelevantDefs targets e =
         (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
         theDefs = Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
         relevantDefs = Map.mapWithKey
-                       (\x (ReachingDefs s) -> Set.filter (exprReferences x) s) theDefs
+                       (\x (ReachingDefs s) ->
+                         Set.filter (isExprRef expDict x) s) theDefs
       in Just relevantDefs
 
-instance Eq (EmbPayload [LabelNode] ReachingDefs) where
-  a == b = True --TODO
 
-instance Ord (EmbPayload [LabelNode] ReachingDefs) where
-  a < b = True --TODO
-
-exprReferences :: LabelNode -> (VarPlus, Maybe Label ) -> Bool
-exprReferences lnode (v, defLab)= error "TODO get references"
+isExprRef
+  :: Map.Map Label LabeledExpr
+  -> LabelNode
+  -> (VarPlus, Maybe Label )
+  -> Bool
+isExprRef exprs lnode (vplus, _) = let
+    e = exprs Map.! (getNodeLabel lnode)
+  in case vplus of
+      NormalVar v -> or $ map (expContainsVar e) v 
+      IntermedExpr l -> expContainsLabel e l
+      FormalReturn v -> expContainsVar e v --check if we reference the function called --TODO more advanced?
+      ActualParam l -> expContainsLabel e l
+      FormalParam pat _ -> or $ map (expContainsVar e) $ getPatternVars pat
 
 makeProgramInfo :: [ControlEdge] -> ProgramInfo LabelNode
 makeProgramInfo edgeList = let
