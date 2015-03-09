@@ -69,8 +69,8 @@ makeProgramInfo targets mods = ProgramInfo (eMap) allLabs labPairs isExtr
     labPairs = [(l,l') | l <- allLabs, l' <- eMap l]
     isExtr var = var `elem` targetVars
 
-transferFun :: FlowEdge Var -> IsReachable -> IsReachable
-transferFun _ r = r
+transferFun :: Map.Map Var.Canonical IsReachable -> Var.Canonical -> IsReachable -> IsReachable
+transferFun _ _ r = r
 
 findReachable :: [Name] -> [(Name, Module)] -> Map.Map Var.Canonical IsReachable
 findReachable targets mods = snd $ minFP isReachableLattice transferFun

@@ -1,9 +1,11 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, ScopedTypeVariables #-}
 module Optimize.EmbellishedMonotone where
 
 import Optimize.MonotoneFramework
 import Optimize.Types
+import Optimize.ControlFlow
 
+import qualified Data.Map as Map
 
 liftJoin :: Lattice payload -> (d -> payload) -> (d -> payload) -> (d -> payload)
 liftJoin lat = \x y d -> (latticeJoin lat) (x d) (y d)
@@ -21,22 +23,23 @@ naiveLift :: (label -> payload -> payload) -> (label -> ( d -> payload) -> (d ->
 naiveLift f lab lhat = (f lab) . lhat
 
 liftToFn
-  :: Eq label
-  => Lattice ([label] -> payload)
-  -> (label -> payload -> payload) --Original transfer function
-  -> (label -> payload -> payload ) --Call-site transfer function
-  -> (label -> payload -> payload ) --return site transfer function
-  -> (FnLabel label)
-  -> ([label] -> payload)
-  -> ([label] -> payload)
-liftToFn _ f fcall fret (Intra l) = (naiveLift f) l
-liftToFn Lattice{..} _f fcall fret (FnCall l) =
-  \lhat d -> case d of
-    [] -> latticeBottom d
-    (lc:d') -> if lc == l
-               then fcall lc (lhat d')
-               else error "Call with invalid top elem"
-    
-liftToFn _ _f fcall fret (FnReturn l) = error "TODO return emb" --TODO same label call and return?
-liftToFn _ _f fcall fret (FnEnter l) = id
-liftToFn _ _f fcall fret (FnExit l) = id 
+  :: Lattice (payload) --Our embellished lattice
+  -> (Map.Map LabelNode payload -> LabelNode -> payload -> payload) --Original transfer function
+  -> ((LabelNode, LabelNode) -> (payload, payload) -> payload) --special 2-value return function
+  -> Map.Map LabelNode ([LabelNode] -> payload)
+  -> LabelNode
+  -> ([LabelNode] -> payload)
+  -> ([LabelNode] -> payload)
+
+liftToFn Lattice{..} f  _fret resultMap (Call label) lhat =
+  \d -> case d of
+    [] -> latticeBottom
+    ( lc@(Call lcn) : dRest) -> if (lcn == label)
+                   then f (Map.map ( $ d ) resultMap) lc (lhat d)
+                   else error "Invalid call-string"
+liftToFn _ f fret resultMap rnode@(Return _ label) lhat' =
+  \d -> 
+    let
+      lhat = (resultMap Map.! (Call label) )
+    in fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) )
+liftToFn _ _ _ _ _ lhat = lhat

@@ -55,15 +55,12 @@ joinAll Lattice{..} = Set.foldr latticeJoin latticeBottom
 --figure out which lattice we're using
 minFP :: (Ord label, Ord payload) =>
          Lattice payload 
-         -> (FlowEdge label -> payload -> payload)
+         -> (Map.Map label payload -> label -> payload -> payload)
          -> ProgramInfo label
          -> (Map.Map label payload, Map.Map label payload) 
 minFP lat@(Lattice{..}) f info = (mfpOpen, error "TODO closed in edge-framework?" {-mfpClosed-})
   where
-    mfpClosed = Map.mapWithKey
-                (\l al ->
-                  joinAll lat $ 
-                  Set.fromList [f (FlowEdge (l, l')) al | l' <- (edgeMap info l)]) mfpOpen
+    mfpClosed = Map.mapWithKey (f mfpOpen) mfpOpen
     --stResult :: ST s [(label, payload)]
     initialSolns = foldr (\l solnsSoFar ->
                              if isExtremal info l
@@ -77,7 +74,7 @@ minFP lat@(Lattice{..}) f info = (mfpOpen, error "TODO closed in edge-framework?
       (FlowEdge (l,l')) = flowEdge 
       al = currentSolns Map.! l
       al' = currentSolns Map.! l'
-      fal = f flowEdge al
+      fal = f currentSolns l al
       (newPairs, newSolns) =
         if (fal `lleq` al') 
         then let
