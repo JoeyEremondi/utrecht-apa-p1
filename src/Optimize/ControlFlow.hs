@@ -272,6 +272,9 @@ functionBody :: LabeledExpr -> LabeledExpr
 functionBody (A _ (Lambda _ e)) = functionBody e
 functionBody e = e
 
+functionLabel (GenericDef _ body _) = case functionBody body of
+  (A (_, label, _) _) -> label
+
 functionArgPats :: LabeledExpr -> [Pattern]
 functionArgPats (A _ (Lambda pat e)) = [pat] ++ (functionArgPats e)
 functionArgPats _ = []
@@ -320,5 +323,4 @@ arithVars = [
   ,Variable.Canonical (Variable.Module ["Basics"]) "=="
   ,Variable.Canonical (Variable.Module ["Basics"]) "/="
             ]
-
 

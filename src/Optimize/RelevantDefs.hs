@@ -43,13 +43,16 @@ nameToCanonVar name = Variable.Canonical  Variable.Local name
 --Give the list of definitions  
 getRelevantDefs
   :: LabeledExpr
-  -> Maybe (ProgramInfo LabelNode, Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)))
+  -> Maybe (ProgramInfo LabelNode,
+           Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)),
+           [LabelNode])
 getRelevantDefs  eAnn =
   let
     --eAnn = annotateCanonical (Map.empty)  (Label []) e
     expDict = labelDict eAnn
     initalEnv = globalEnv eAnn
     (A _ (Let defs _)) = eAnn
+    fnLabels = map functionLabel defs
     fnInfo =
       foldr (\(GenericDef (Pattern.Var n) body _ ) finfo ->
               Map.insert (nameToCanonVar n)
@@ -63,6 +66,7 @@ getRelevantDefs  eAnn =
     edges = concat `fmap` edgeListList
     maybeAllNodes = (\edgeList -> concat [[x,y] | (x,y) <- edgeList]) `fmap` edges --TODO nub?
     progInfo = makeProgramInfo `fmap` edges
+    targetNodes = map (\n -> ProcExit n ) fnLabels
   in case (progInfo, maybeAllNodes) of
     (Nothing, _) -> Nothing
     (_, Nothing) -> Nothing
@@ -76,7 +80,7 @@ getRelevantDefs  eAnn =
         relevantDefs = Map.mapWithKey
                        (\x (ReachingDefs s) ->
                          Set.filter (isExprRef expDict x) s) theDefs
-      in Just (pinfo, relevantDefs)
+      in Just (pinfo, relevantDefs, targetNodes)
 
 
 isExprRef
