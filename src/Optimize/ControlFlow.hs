@@ -13,6 +13,7 @@ import qualified Data.Set                   as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
 
+import qualified AST.Variable as Variable
 
 import           Optimize.Environment
 import           Optimize.MonotoneFramework
@@ -163,7 +164,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
           
         _ -> Nothing --If function is locally defined, or not fully instantiated, we fail
     Lambda _ _ -> Nothing --Fail for local lambda defs --TODO lambda case?
-    Binop op e1 e2 -> case (error "TODO check if arith") of
+    Binop op e1 e2 -> case (isArith op) of
       True -> return (Map.insert (getLabel e) (headMap Map.! (getLabel e1)) headMap  
                         , Map.insert (getLabel e) (tailMap Map.! (getLabel e2)) headMap
                           ,subEdges ) --Arithmetic doesn't need its own statements, since we can do inline
@@ -298,6 +299,26 @@ allExprEdges fnInfo e = (\(_,_,edges) -> edges) `fmap` foldE
            (\ _ e subs-> oneLevelEdges fnInfo e subs)
            e
 
+isArith :: Var -> Bool
+isArith = (`elem` arithVars )
 
+arithVars = [
+  Variable.Canonical (Variable.Module ["Basics"]) "+"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "-"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "*"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "/"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "&&"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "||"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "^"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "//"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "rem"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "%"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "<"
+  ,Variable.Canonical (Variable.Module ["Basics"]) ">"
+  ,Variable.Canonical (Variable.Module ["Basics"]) "<="
+  ,Variable.Canonical (Variable.Module ["Basics"]) ">="
+  ,Variable.Canonical (Variable.Module ["Basics"]) "=="
+  ,Variable.Canonical (Variable.Module ["Basics"]) "/="
+            ]
 
 
