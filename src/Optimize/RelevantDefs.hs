@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, UndecidableInstances, FlexibleInstances, StandaloneDeriving #-}
 module Optimize.RelevantDefs (getRelevantDefs) where
 
 import           AST.Annotation             (Annotated (..))
@@ -26,7 +26,14 @@ insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs
 
 
 
-
+getFreeVars :: [ControlNode] ->  [VarPlus]
+getFreeVars nodes = Set.toList $ foldr (
+  \ lnode varsSoFar ->
+    let thisLevelVars = case lnode of
+          (Assign v _ ) -> [v]
+          _ -> []
+    in varsSoFar `Set.union` (Set.fromList thisLevelVars)
+  ) Set.empty nodes
 
     
 
@@ -35,7 +42,7 @@ insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs
 getRelevantDefs
   :: [Name]
   -> Canon.Expr
-  -> Maybe (Map.Map Label (Set.Set (Name, Label)))
+  -> Maybe (Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)))
 getRelevantDefs targets e =
   let
     eAnn = annotateCanonical (error "TODO initial global env")  (Label []) e
@@ -52,11 +59,30 @@ getRelevantDefs targets e =
               ) finfo) Map.empty defs
     edgeListList = forM defs (\(GenericDef _ expr _) -> allExprEdges fnInfo expr)
     edges = concat `fmap` edgeListList
+    maybeAllNodes = (\edgeList -> concat [[x,y] | (x,y) <- edgeList]) `fmap` edges --TODO nub?
     progInfo = makeProgramInfo `fmap` edges
-  in case progInfo of
-    Nothing -> Nothing
-    _ -> return Map.empty
+  in case (progInfo, maybeAllNodes) of
+    (Nothing, _) -> Nothing
+    (_, Nothing) -> Nothing
+    (Just pinfo, Just allNodes) ->
+      let
+        freeVars = getFreeVars allNodes
+        iotaVal = Set.fromList [ (x, Nothing) | x <- freeVars]
+        ourLat = embellishedRD iotaVal
+        (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
+        theDefs = Map.map (\(EmbPayload lhat) -> lhat []) theDefsHat
+        relevantDefs = Map.mapWithKey
+                       (\x (ReachingDefs s) -> Set.filter (exprReferences x) s) theDefs
+      in Just relevantDefs
 
+instance Eq (EmbPayload [LabelNode] ReachingDefs) where
+  a == b = True --TODO
+
+instance Ord (EmbPayload [LabelNode] ReachingDefs) where
+  a < b = True --TODO
+
+exprReferences :: LabelNode -> (VarPlus, Maybe Label ) -> Bool
+exprReferences lnode (v, defLab)= error "TODO get references"
 
 makeProgramInfo :: [ControlEdge] -> ProgramInfo LabelNode
 makeProgramInfo edgeList = let
@@ -77,8 +103,8 @@ newtype ReachingDefs = ReachingDefs (Set.Set RDef)
                       deriving (Eq, Ord)
 
 --TODO check this
-reachingDefs :: Set.Set RDef -> Lattice ReachingDefs
-reachingDefs iotaVal =  Lattice {
+reachingDefsLat :: Set.Set RDef -> Lattice ReachingDefs
+reachingDefsLat iotaVal =  Lattice {
   latticeBottom = ReachingDefs (Set.empty),
   latticeJoin  = (\(ReachingDefs l1) ((ReachingDefs l2)) ->
     ReachingDefs (l1 `Set.union` l2)),
@@ -87,6 +113,8 @@ reachingDefs iotaVal =  Lattice {
     l1 `Set.isSubsetOf` l2,
   flowDirection = BackwardAnalysis
   }
+
+
 
 removeKills (Assign var label) aIn = Set.filter (not . isKilled) aIn
   where isKilled (setVar, setLab) = (setVar == var)
@@ -104,10 +132,30 @@ gens _ = Set.empty
 
 
 --Transfer function for reaching definitions, we find the fixpoint for this
-transferFun :: Map.Map Label LabeledExpr -> LabelNode -> ReachingDefs -> ReachingDefs
+transferFun :: Map.Map LabelNode ReachingDefs -> LabelNode -> ReachingDefs -> ReachingDefs
 transferFun labMap cfgNode (ReachingDefs aIn) =
   ReachingDefs $ (removeKills cfgNode aIn) `Set.union` (gens cfgNode)
 
 
 genericDefVars :: GenericDef a Var -> [Var]
 genericDefVars (GenericDef p _ _) = getPatternVars p
+
+
+
+embellishedRD
+  :: Set.Set RDef
+  -> Lattice (EmbPayload [LabelNode] ReachingDefs)
+embellishedRD iotaVal = liftToEmbellished $ reachingDefsLat iotaVal
+
+returnTransfer :: (LabelNode, LabelNode) -> (ReachingDefs, ReachingDefs) -> ReachingDefs
+returnTransfer (lc, lr) (ReachingDefs aCall, ReachingDefs  aRet ) =
+  ReachingDefs $ (removeKills lr (removeKills lc aCall))
+    `Set.union` (gens lc) `Set.union` (gens lr) 
+
+liftedTransfer
+  :: Set.Set RDef
+  -> Map.Map LabelNode (EmbPayload [LabelNode] ReachingDefs)
+  -> LabelNode
+  -> (EmbPayload [LabelNode]  ReachingDefs)
+  -> (EmbPayload [LabelNode]  ReachingDefs)
+liftedTransfer iotaVal = liftToFn (reachingDefsLat iotaVal) transferFun returnTransfer

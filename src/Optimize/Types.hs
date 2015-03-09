@@ -1,3 +1,4 @@
+{-# LANGUAGE StandaloneDeriving #-}
 module Optimize.Types where
 
 import qualified AST.Pattern as Pattern
@@ -33,6 +34,7 @@ data GenericDef a v = GenericDef {
   defPat :: Pattern,
   defBody :: (Expr a (GenericDef a v) v),
   defType:: (Maybe CanonicalType) }
+                
 
 --TODO move to better place
 newtype Label = Label [Int]
@@ -43,15 +45,6 @@ type AExpr' a = Expr' a (GenericDef a Var) Var
 
 type LabeledExpr = AExpr (Region, Label, Env Label)
 type LabeledExpr' = AExpr' (Region, Label, Env Label)
-
-type InterExpr = AExpr (Region, FnLabel Label, Env Label) 
-
-data FnLabel l =
-  FnCall l
-  | FnReturn l
-  | FnEnter l
-  | FnExit l
-  | Intra l
                         
 --Basic getter for labels
 label :: LabeledExpr -> Label
