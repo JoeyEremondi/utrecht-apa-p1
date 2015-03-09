@@ -8,10 +8,21 @@ import AST.Expression.General
 import qualified AST.Annotation as Annotate
 import qualified AST.Variable as Var
 import qualified Data.Map as Map
+import qualified Elm.Compiler.Module as PublicModule
 
 
 --Generic place to put types and definitions
 --To avoid dep cycles
+
+
+type WholeProgOptFun = 
+  [PublicModule.Name] 
+  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
+  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface) 
+
+type ModuleOptFun = PublicModule.Name
+                    -> (PublicModule.Module, PublicModule.Interface)
+                    -> (PublicModule.Module, PublicModule.Interface)
 
 --Export from AST so that things are nice and encapsulated
 type Region = Annotate.Region

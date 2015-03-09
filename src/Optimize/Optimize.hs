@@ -9,16 +9,10 @@ import qualified Elm.Compiler.Module as PublicModule
 import qualified AST.Variable as Var
 
 import qualified Optimize.Reachability as Reachability
---import qualified Optimize.RelevantDefs as RelevantDefs
+import qualified Optimize.SDG as SDG
+import Optimize.Types
 
-type WholeProgOptFun = 
-  [PublicModule.Name] 
-  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
-  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface) 
 
-type ModuleOptFun = PublicModule.Name
-                    -> (PublicModule.Module, PublicModule.Interface)
-                    -> (PublicModule.Module, PublicModule.Interface)
 
 {-|
 Apply a list of transformations to our canonical ASTs.
@@ -34,10 +28,10 @@ optimizeModule name initialMod =  foldr (\f modDict -> f name modDict) initialMo
 
 wholeProgOpts :: [WholeProgOptFun]
 wholeProgOpts = [Reachability.removeUnreachable
-                 --, RelevantDefs.removeDeadCodeWP
+                 ,SDG.removeDeadCode
           ]
 
 moduleOpts :: [ModuleOptFun]
 moduleOpts = [Reachability.removeUnreachableModule
-             --, RelevantDefs.removeDeadCodeModule
+             --,SDG.removeDeadCode
              ]
