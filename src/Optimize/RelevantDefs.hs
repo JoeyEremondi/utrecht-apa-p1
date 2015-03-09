@@ -2,7 +2,7 @@
 module Optimize.RelevantDefs (getRelevantDefs) where
 
 import           AST.Annotation             (Annotated (..))
-import qualified AST.Expression.Canonical   as Canon
+--import qualified AST.Expression.Canonical   as Canon
 import           AST.Expression.General
 import qualified AST.Module                 as Module
 import qualified AST.Pattern                as Pattern
@@ -42,12 +42,11 @@ nameToCanonVar name = Variable.Canonical  Variable.Local name
 
 --Give the list of definitions  
 getRelevantDefs
-  :: [Name]
-  -> Canon.Expr
-  -> Maybe (Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)))
-getRelevantDefs targets e =
+  :: LabeledExpr
+  -> Maybe (ProgramInfo LabelNode, Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)))
+getRelevantDefs  eAnn =
   let
-    eAnn = annotateCanonical (Map.empty)  (Label []) e
+    --eAnn = annotateCanonical (Map.empty)  (Label []) e
     expDict = labelDict eAnn
     initalEnv = globalEnv eAnn
     (A _ (Let defs _)) = eAnn
@@ -77,7 +76,7 @@ getRelevantDefs targets e =
         relevantDefs = Map.mapWithKey
                        (\x (ReachingDefs s) ->
                          Set.filter (isExprRef expDict x) s) theDefs
-      in Just relevantDefs
+      in Just (pinfo, relevantDefs)
 
 
 isExprRef

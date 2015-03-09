@@ -188,6 +188,18 @@ varsForDef (GenericDef p e v) = getPatternVars p
 annotateCanonical :: Env Label -> Label -> Canon.Expr -> LabeledExpr
 annotateCanonical initEnv initLabel = (addScope initEnv) . (makeLabels initLabel) . makeGenericDefs 
 
+--Convert a labeled expression back to a canonical one
+toCanonical :: LabeledExpr -> Canon.Expr
+toCanonical =
+  tformE
+  (\ _ () -> repeat () )
+  ()
+  (
+    \env (reg, _, _) -> reg,
+    \env (GenericDef pat e t) -> Canon.Definition pat (toCanonical e) t,
+    cid,
+    cid
+   )
 
 --Useful when we apply a bunch of annotations and get nested tuples
 --TODO multiple levels deep?
