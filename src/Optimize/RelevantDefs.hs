@@ -70,7 +70,7 @@ getRelevantDefs targets e =
         iotaVal = Set.fromList [ (x, Nothing) | x <- freeVars]
         ourLat = embellishedRD iotaVal
         (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
-        theDefs = Map.map (\(EmbPayload lhat) -> lhat []) theDefsHat
+        theDefs = Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
         relevantDefs = Map.mapWithKey
                        (\x (ReachingDefs s) -> Set.filter (exprReferences x) s) theDefs
       in Just relevantDefs
@@ -145,7 +145,13 @@ genericDefVars (GenericDef p _ _) = getPatternVars p
 embellishedRD
   :: Set.Set RDef
   -> Lattice (EmbPayload [LabelNode] ReachingDefs)
-embellishedRD iotaVal = liftToEmbellished $ reachingDefsLat iotaVal
+embellishedRD iotaVal  =
+  let
+    lat = (reachingDefsLat iotaVal)
+    liftedIota = EmbPayload [] (\ d -> case d of
+                                   [] -> ReachingDefs iotaVal
+                                   _ -> latticeBottom lat)
+  in liftToEmbellished liftedIota lat
 
 returnTransfer :: (LabelNode, LabelNode) -> (ReachingDefs, ReachingDefs) -> ReachingDefs
 returnTransfer (lc, lr) (ReachingDefs aCall, ReachingDefs  aRet ) =

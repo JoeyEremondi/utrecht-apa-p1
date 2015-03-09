@@ -47,13 +47,13 @@ data Lattice a = Lattice {
   }
 
 
-joinAll :: (Ord a) => (Lattice a) -> Set.Set a -> a
-joinAll Lattice{..} = Set.foldr latticeJoin latticeBottom
+joinAll :: (Lattice a) -> [a] -> a
+joinAll Lattice{..} = foldr latticeJoin latticeBottom
 
 --worklist algo for least fixed point
 --We don't actually need to pass in bottom, but it helps the typechecker
 --figure out which lattice we're using
-minFP :: (Ord label, Ord payload) =>
+minFP :: (Ord label) =>
          Lattice payload 
          -> (Map.Map label payload -> label -> payload -> payload)
          -> ProgramInfo label

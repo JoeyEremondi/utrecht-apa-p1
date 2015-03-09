@@ -7,27 +7,31 @@ import Optimize.ControlFlow
 
 import qualified Data.Map as Map
 
-newtype EmbPayload a b = EmbPayload (a -> b)
+data EmbPayload a b = EmbPayload [a] (a -> b)
 
+{-
 liftJoin
   :: Lattice payload
   -> (EmbPayload d payload)
   -> (EmbPayload d payload)
   -> (EmbPayload d payload)
-liftJoin lat = \(EmbPayload x) (EmbPayload y) ->
-  EmbPayload $ \ d -> (latticeJoin lat) (x d) (y d)
+liftJoin lat = \(EmbPayload domain1 x) (EmbPayload domain2 y) ->
+  EmbPayload (domain1 ++ domain2) $ \ d -> (latticeJoin lat) (x d) (y d)
+-}
+
 
 liftToEmbellished
-  :: (Eq (EmbPayload d payload))
-  => Lattice payload
+  :: (EmbPayload d payload)
+  -> Lattice payload
   -> Lattice (EmbPayload d payload)
-liftToEmbellished lat =
+liftToEmbellished iotaVal lat =
   Lattice {
-    latticeBottom = EmbPayload $ \_ -> latticeBottom lat,
-    latticeJoin = \ (EmbPayload x) (EmbPayload y)
-                  -> EmbPayload $ \d -> (latticeJoin lat) (x d) (y d),
-    iota = EmbPayload $ \_ -> iota lat,
-    lleq = \x y -> (liftJoin lat x y) == y
+    latticeBottom = EmbPayload [] $ \_ -> latticeBottom lat,
+    latticeJoin = \ (EmbPayload domain1 x) (EmbPayload domain2 y)
+                  -> EmbPayload (domain1 ++ domain2) $ \d -> (latticeJoin lat) (x d) (y d),
+    iota = iotaVal,
+    lleq = \(EmbPayload domain1 x) (EmbPayload domain2 y) ->
+      and $ map (\d -> (lleq lat) (x d) (y d) ) (domain1 ++ domain2)
   }
 
 naiveLift :: (label -> payload -> payload) -> (label -> ( d -> payload) -> (d -> payload))
@@ -42,15 +46,15 @@ liftToFn
   -> (EmbPayload [LabelNode] payload)
   -> (EmbPayload [LabelNode] payload)
 
-liftToFn Lattice{..} f  _fret resultMap (Call label) (EmbPayload lhat) =
-  EmbPayload $ \d -> case d of
+liftToFn Lattice{..} f  _fret resultMap (Call label) (EmbPayload domain lhat) =
+  EmbPayload domain $ \d -> case d of
     [] -> latticeBottom
     ( lc@(Call lcn) : dRest) -> if (lcn == label)
-                   then f (Map.map (\(EmbPayload lh) -> lh d ) resultMap) lc (lhat d)
+                   then f (Map.map (\(EmbPayload domain lh) -> lh d ) resultMap) lc (lhat d)
                    else error "Invalid call-string"
-liftToFn _ f fret resultMap rnode@(Return _ label) (EmbPayload lhat') =
-  EmbPayload $ \d -> 
-    let
-      (EmbPayload lhat) = (resultMap Map.! (Call label) )
-    in fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) )
+liftToFn _ f fret resultMap rnode@(Return _ label) (EmbPayload domain lhat') =
+  let
+    (EmbPayload domain2 lhat) = (resultMap Map.! (Call label) )
+  in EmbPayload (domain ++ domain2) $ \d -> 
+    fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) )
 liftToFn _ _ _ _ _ lhat = lhat
