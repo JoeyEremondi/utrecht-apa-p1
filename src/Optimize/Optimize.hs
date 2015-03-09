@@ -28,10 +28,10 @@ optimizeModule name initialMod =  foldr (\f modDict -> f name modDict) initialMo
 
 wholeProgOpts :: [WholeProgOptFun]
 wholeProgOpts = [Reachability.removeUnreachable
-                 ,SDG.removeDeadCode
+                 --,
           ]
 
 moduleOpts :: [ModuleOptFun]
 moduleOpts = [Reachability.removeUnreachableModule
-             --,SDG.removeDeadCode
+             ,SDG.removeModuleDeadCode
              ]

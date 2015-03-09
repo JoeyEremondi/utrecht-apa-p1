@@ -131,9 +131,11 @@ removeDeadCode targetVars e = case dependencyMap of
 
 --TODO label definitions, not Let statements
 
-removeModuleDeadCode
-  :: PublicModule.Name
-    -> (PublicModule.Module, PublicModule.Interface)
-    -> (PublicModule.Module, PublicModule.Interface)
-removeModuleDeadCode modName (modul, iface) =
-  (removeDeadCode modul, iface)
+removeModuleDeadCode :: ModuleOptFun
+removeModuleDeadCode modName (modul, iface) = let
+    isValue value = case value of
+      Variable.Value s -> True
+      _ -> False
+    valToName (Variable.Value s) = Name [s]
+    names = map valToName $ filter isValue $ Module.iExports iface  
+  in (tformModule (removeDeadCode names) modul, iface)
