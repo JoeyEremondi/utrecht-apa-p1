@@ -8,7 +8,7 @@ import qualified AST.Module                 as Module
 import qualified AST.Pattern                as Pattern
 import           Control.Monad
 import qualified Data.List                  as List
-import qualified Data.Map                   as Map
+import qualified Data.Map                   as Map hiding ((!))
 import qualified Data.Set                   as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
@@ -23,12 +23,20 @@ import Optimize.EmbellishedMonotone
 import Optimize.ControlFlow
 import Optimize.RelevantDefs
 
+import Debug.Trace (trace)
 
+
+data SDGNode = SDGLabel Label | SDGFunction LabelNode
+  deriving (Eq, Ord, Show)
 
 --The system dependence graph
-newtype SDG = SDG {unSDG :: Set.Set LabelNode}
+newtype SDG = SDG {unSDG :: Set.Set SDGNode}
+  deriving (Eq, Ord, Show)
 
-forwardSliceLattice :: Set.Set LabelNode -> Lattice SDG
+makeTargetSet :: Set.Set LabelNode -> Set.Set SDGNode
+makeTargetSet = Set.map (SDGLabel . getNodeLabel)
+
+forwardSliceLattice :: Set.Set SDGNode -> Lattice SDG
 forwardSliceLattice startDefs = Lattice {
   --latticeTop :: a
   latticeBottom = SDG Set.empty ,
@@ -40,7 +48,7 @@ forwardSliceLattice startDefs = Lattice {
 
 embForwardSliceLat startDefs  =
   liftToEmbellished (EmbPayload [] $ \d -> case d of
-                        [] -> SDG startDefs
+                        [] -> SDG startDefs 
                         _ -> SDG Set.empty) $ forwardSliceLattice startDefs
 
 --Our transfer funciton is basically the identity,
@@ -48,24 +56,20 @@ embForwardSliceLat startDefs  =
 --TODO is this right?
 transferFun
   :: Lattice SDG
-  -> Map.Map LabelNode (EmbPayload [LabelNode] SDG)
-  -> LabelNode
-  -> EmbPayload [LabelNode] SDG
-  -> EmbPayload [LabelNode] SDG
+  -> Map.Map SDGNode (EmbPayload SDGNode SDG)
+  -> SDGNode
+  -> EmbPayload SDGNode SDG
+  -> EmbPayload SDGNode SDG
 transferFun Lattice{..} resultDict lnode lhat@(EmbPayload domain pl) = case lnode of
-  Branch l -> lhat
-  Assign var l -> lhat
-  Call l -> EmbPayload domain (\d -> case d of
+  SDGLabel l -> lhat
+  SDGFunction (Call l) -> EmbPayload domain (\d -> case d of
     [] -> latticeBottom
     lc:d' -> pl d')
-  Return fn l -> let 
-      (EmbPayload domain2 lcall) = resultDict Map.! (Call l)
+  SDGFunction (Return fn l) -> let 
+      (EmbPayload domain2 lcall) = resultDict `mapGet` (SDGFunction $ Call l)
     in EmbPayload (domain ++ domain2) $ \d ->
-     (lcall d) `latticeJoin` (pl ((Call l):d ) )    
-  ProcEntry l -> lhat
-  ProcExit l -> lhat
-  GlobalEntry -> lhat
-  GlobalExit -> lhat
+     (lcall d) `latticeJoin` (pl ((SDGFunction $ Call l):d ) )    
+
 
 --Go through our CFG and determine if an edge is a control-flow edges
 --to go in our call-graph
@@ -75,48 +79,64 @@ isFunctionEdge edge = case edge of
   (ProcExit _, Return _ _ ) -> True
   _ -> False
 
+makeFunctionEdge :: (LabelNode, LabelNode) -> (SDGNode, SDGNode)
+makeFunctionEdge (n1, n2) = (SDGFunction n1, SDGFunction n2) 
+
 sdgProgInfo
   :: [Name]
   -> LabeledExpr
-  -> Maybe (ProgramInfo LabelNode, [LabelNode])
+  -> Maybe (ProgramInfo SDGNode, [SDGNode])
 sdgProgInfo names eAnn = do
     (reachDefInfo, relevantDefs, targetNodes) <- getRelevantDefs eAnn
     --targetNodes <- getTargetNodes names eAnn
-    let callEdges = filter isFunctionEdge (labelPairs reachDefInfo)
+    let callEdges =
+          map makeFunctionEdge $ filter isFunctionEdge (labelPairs reachDefInfo)
     let controlEdges = [] --TODO need control flow edges?
-    let dataEdges = []
-    let allEdges = callEdges ++ controlEdges ++ dataEdges
+    let testEdges = Map.elems $ Map.mapWithKey
+            (\n rdSet -> [(n,  def) | (_, Just def) <- (Set.toList rdSet)] ) relevantDefs
+    let relevantDefEdges =
+          concat $ Map.elems $ Map.mapWithKey
+            (\n rdSet -> [(n,  def) | (_, Just def) <- (Set.toList rdSet)] ) relevantDefs
+    --If n1 depends on def at label lab, then we have lab -> n1 as dependency
+    --TODO is this right?
+    let dataEdges = map (\(n1, lab) -> (SDGLabel lab, SDGLabel $ getNodeLabel n1)  ) relevantDefEdges
+    let allEdges = trace ("Got relevant defs " ++ show relevantDefs) callEdges ++ controlEdges ++ dataEdges
+    let sdgTargets = trace ("SDG Edges: " ++ show allEdges) $ makeTargetSet $ Set.fromList targetNodes
     let pinfo =
           ProgramInfo {
             edgeMap = \lnode -> [l2 | (l1, l2) <- allEdges, l1 == lnode], --TODO make faster
             allLabels = List.nub $ concat $ [[l1, l2] | (l1, l2) <- allEdges ],
             labelPairs = allEdges,
-            isExtremal = \lnode -> lnode `elem` targetNodes
+            isExtremal = \lnode -> lnode `Set.member` sdgTargets
           }
     
-    return (pinfo,targetNodes)
+    return (pinfo, Set.toList sdgTargets)
 
-setFromEmb :: EmbPayload [LabelNode] SDG -> Set.Set LabelNode
+setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
 setFromEmb (EmbPayload _ lhat) = unSDG $ lhat []
 
 removeDeadCode :: [Name] -> Canon.Expr -> Canon.Expr
 removeDeadCode targetVars e = case dependencyMap of
-  Nothing -> e
-  Just (depMap, targetNodes) -> toCanonical
+  Nothing -> error "Failed getting data Dependencies"
+  Just (depMap, targetNodes) -> trace ("Got depMap " ++ show depMap) $ toCanonical
     $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where
     eAnn = annotateCanonical (Map.empty)  (Label []) e
-    toDefSet defMap targetNodes = let
-        defsReachingTargets = Set.unions [setFromEmb (defMap Map.! tnode) | tnode <- targetNodes]
+    toDefSet depMap targetNodes = trace "Makign def set " $ let
+        defsReachingTargets =
+          trace ( "DefsReachingTargets " ++ (show depMap ) ) $ Set.unions [setFromEmb (depMap `mapGet` tnode) | tnode <- targetNodes]
       in defsReachingTargets
     dependencyMap = do
-      (pinfo, targetNodes) <- sdgProgInfo targetVars eAnn
+      (pinfo, targetNodes) <- trace "Got SDG info" $  sdgProgInfo targetVars eAnn
       let (_,defMap) =
             minFP
               (embForwardSliceLat $ Set.fromList targetNodes)
               (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo 
       return $  (defMap, targetNodes)
-    removeDefs defSet =
+    removeDefs defSet (A ann (Let defs body)) =
+      A ann $ Let (map (\(GenericDef pat body ty) -> GenericDef pat (removeDefsInBody defSet body) ty )
+           defs) body  
+    removeDefsInBody defSet = trace ("Removing with def set " ++ show defSet ) $
       tformEverywhere (\(A ann@(_,label,_) e) ->
         case e of
           Let defs body -> A ann $ Let (filter (defIsRelevant defSet label) defs) body
@@ -124,7 +144,7 @@ removeDeadCode targetVars e = case dependencyMap of
     defIsRelevant defSet label (GenericDef pat expr ty) = let
         definedVars = getPatternVars pat
          --We want one of these assignments to be in the relevant set
-        assignToLookFor = Assign (NormalVar definedVars) label
+        assignToLookFor = {-Assign (NormalVar definedVars)-}SDGLabel  label
       in assignToLookFor `Set.member` defSet
 
    

@@ -1,4 +1,4 @@
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE StandaloneDeriving, FlexibleInstances #-}
 module Optimize.Types where
 
 import qualified AST.Pattern as Pattern
@@ -46,6 +46,18 @@ data GenericDef a v = GenericDef {
   defBody :: (Expr a (GenericDef a v) v),
   defType:: (Maybe CanonicalType) }
                 
+type LabelDef = GenericDef (Region, Label, Env Label) Var
+
+deriving instance Show LabelDef
+
+--deriving instance Show Var
+
+{-
+instance (Show a) => Show (Env a)
+  where
+    show s = "Env " ++ show s
+-}
+
 
 --TODO move to better place
 newtype Label = Label [Int]
@@ -60,3 +72,6 @@ type LabeledExpr' = AExpr' (Region, Label, Env Label)
 --Basic getter for labels
 label :: LabeledExpr -> Label
 label (Annotate.A (_,a,_) _) = a
+
+--deriving instance Show LabeledExpr'
+--deriving instance Show LabeledExpr

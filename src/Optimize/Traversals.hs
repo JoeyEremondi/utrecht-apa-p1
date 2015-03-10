@@ -168,7 +168,7 @@ makeLabels :: Label -> Expr a (GenericDef a v) v -> Expr (a, Label) (GenericDef 
 makeLabels init = tformE
   (\_ (Label l) -> map (\i -> Label $ [i]++l) [1..] )
   (init)
-  ( (\c a -> (a,c)), \_ -> tformDef (makeLabels init), cid, cid)
+  ( (\c a -> (a,c)), \lab -> tformDef (makeLabels lab), cid, cid)
 
 addScope
   :: Env Label

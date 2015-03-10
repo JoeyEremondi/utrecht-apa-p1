@@ -15,7 +15,7 @@ import Optimize.Traversals
 import Optimize.Types
 
 newtype IsReachable = IsReachable {fromReachable :: Bool}
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 reachingJoin :: IsReachable -> IsReachable -> IsReachable
 reachingJoin a b = IsReachable (fromReachable a || fromReachable b )

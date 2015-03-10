@@ -7,7 +7,13 @@ import Optimize.ControlFlow
 
 import qualified Data.Map as Map
 
-data EmbPayload a b = EmbPayload [a] (a -> b)
+data EmbPayload a b = EmbPayload [[a]] ([a] -> b)
+
+instance (Show b) => Show (EmbPayload a b)
+  where
+    show (EmbPayload domain lhat) =
+      concatMap (\ d -> show $ lhat d) domain
+      
 
 {-
 liftJoin
@@ -31,7 +37,8 @@ liftToEmbellished iotaVal lat =
                   -> EmbPayload (domain1 ++ domain2) $ \d -> (latticeJoin lat) (x d) (y d),
     iota = iotaVal,
     lleq = \(EmbPayload domain1 x) (EmbPayload domain2 y) ->
-      and $ map (\d -> (lleq lat) (x d) (y d) ) (domain1 ++ domain2)
+      and $ map (\d -> (lleq lat) (x d) (y d) ) (domain1 ++ domain2),
+    flowDirection = flowDirection lat
   }
 
 naiveLift :: (label -> payload -> payload) -> (label -> ( d -> payload) -> (d -> payload))
@@ -41,10 +48,10 @@ liftToFn
   :: Lattice (payload) --Our embellished lattice
   -> (Map.Map LabelNode payload -> LabelNode -> payload -> payload) --Original transfer function
   -> ((LabelNode, LabelNode) -> (payload, payload) -> payload) --special 2-value return function
-  -> Map.Map LabelNode (EmbPayload [LabelNode] payload)
+  -> Map.Map LabelNode (EmbPayload LabelNode payload)
   -> LabelNode
-  -> (EmbPayload [LabelNode] payload)
-  -> (EmbPayload [LabelNode] payload)
+  -> (EmbPayload LabelNode payload)
+  -> (EmbPayload LabelNode payload)
 
 liftToFn Lattice{..} f  _fret resultMap (Call label) (EmbPayload domain lhat) =
   EmbPayload domain $ \d -> case d of

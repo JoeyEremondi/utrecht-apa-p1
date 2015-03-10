@@ -103,12 +103,15 @@ Library
         Type.Type,
         Type.Unify,
         Optimize.MonotoneFramework,
+        Optimize.Environment,
         Optimize.Traversals,
         Optimize.ControlFlow,
         Optimize.EmbellishedMonotone,
         Optimize.Optimize,
         Optimize.RelevantDefs,
         Optimize.Reachability,
+        Optimize.SDG,
+        Optimize.Types,
         Paths_elm_compiler
 
     Build-depends:
@@ -134,7 +137,8 @@ Library
         transformers >= 0.2 && < 0.5,
         union-find >= 0.2 && < 0.3,
         unordered-containers >= 0.1 && < 0.3,
-        array
+        array,
+        elm-core-sources
 
 
 Executable elm-doc

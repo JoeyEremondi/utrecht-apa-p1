@@ -1,6 +1,6 @@
 module Optimize.Environment where
 
-import qualified Data.Map as Map
+import qualified Data.Map as Map hiding ((!))
 import AST.Expression.General 
 import AST.Annotation
 import qualified AST.Pattern as Pattern
