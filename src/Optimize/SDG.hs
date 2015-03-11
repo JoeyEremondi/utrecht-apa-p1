@@ -124,7 +124,7 @@ sdgProgInfo names eAnn = do
               in isTarget
           }
     
-    return (pinfo, Set.toList sdgTargets)
+    return $ trace ("SDG Edges: " ++ show allEdges) $ (pinfo, Set.toList sdgTargets)
 
 setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
 setFromEmb (EmbPayload _ lhat) = unSDG $ lhat []
@@ -156,17 +156,15 @@ removeDeadCode  targetVars e = case dependencyMap of
 
 --Given a set of target nodes, a map from nodes to other nodes depending on that node,
 --And a module's expression, traverse the tree and remove unnecessary Let definitions
-removeDefs targetNodes depMap (A ann (Let defs body)) =
-      A ann $ Let (map (\(GenericDef pat bdy ty) -> GenericDef pat (removeDefsInBody targetNodes depMap bdy) ty )
-           defs) body  
-
-
-removeDefsInBody targetNodes depMap = trace ("Removing with dep depMap " ++ show depMap ) $
-      tformEverywhere (\(A ann@(_,defLab,_env) eToTrans) ->
+removeDefs targetNodes depMap eAnn =
+      tformModEverywhere (\(A ann@(_,defLab,_env) eToTrans) ->
         case eToTrans of
-          Let defs body -> A ann $ Let (filter (defIsRelevant defLab targetNodes depMap ) defs) body
-          _ -> A ann eToTrans )
-    --TODO treat each def as separate
+          Let defs body -> A ann $
+            Let (filter (defIsRelevant defLab targetNodes depMap ) defs) body
+          _ -> A ann eToTrans ) eAnn
+
+
+
 
 
 

@@ -59,9 +59,10 @@ getRelevantDefs  eAnn =
     maybeInfo = do
       let expDict = labelDict eAnn
       --let initalEnv = globalEnv eAnn
-      let (A _ (Let defs _)) = trace ("Exp dict" ++ show expDict) $ eAnn
+      let defs = defsFromModuleExpr eAnn
+      --let (A _ (Let defs _)) = eAnn
       let fnLabels = map (\(GenericDef _ (A (_, l, _ ) _) _) -> l ) defs
-      let fnInfo = foldr (\(GenericDef (Pattern.Var n) fnDef _ ) finfo ->
+      let fnInfo = trace ("#####Fn labels " ++ show fnLabels  ) foldr (\(GenericDef (Pattern.Var n) fnDef _ ) finfo ->
               Map.insert (nameToCanonVar n)
               (FunctionInfo
                (getArity fnDef)
@@ -93,12 +94,12 @@ getRelevantDefs  eAnn =
         domain = map (\d -> map Call d) $ contextDomain contextDepth reachMap
         freeVars = trace ("Getting free vars, length pinfo edges " ++ show (length $ labelPairs pinfo )) $ getFreeVars allNodes
         iotaVal = Set.fromList [ (x, Nothing) | x <- freeVars]
-        ourLat = embellishedRD domain  iotaVal
-        --ourLat = reachingDefsLat iotaVal
-        --(_, theDefsHat) = minFP ourLat transferFun pinfo
-        (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
-        theDefs = trace "got fp defs" $ Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
-        --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
+        --ourLat = embellishedRD domain  iotaVal
+        ourLat = reachingDefsLat iotaVal
+        (_, theDefsHat) = minFP ourLat transferFun pinfo
+        --(_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
+        --theDefs = trace "got fp defs" $ Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
+        theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = Map.mapWithKey
                        (\x (ReachingDefs s) ->
                          Set.filter (isExprRef fnInfo expDict x) s) theDefs

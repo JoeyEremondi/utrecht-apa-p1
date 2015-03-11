@@ -253,3 +253,32 @@ labelDict =
   (\(GenericDef _ e v) -> [e])
   (\ _ e@(A (_,lExp,_) _) subDicts ->
     Map.insert lExp e $ Map.unions subDicts)
+
+
+defsFromModuleExpr :: LabeledExpr -> [LabelDef]
+defsFromModuleExpr e = helper e []
+  where helper e accum = case e of
+          (A _ (Let defs body)) -> helper body (defs ++ accum)
+          _ -> accum
+
+{-
+tformModE
+  :: (Expr a d v -> context -> [context])
+  -> context
+  -> (context -> a -> aa,
+            context -> d -> dd,
+            context -> v -> vv,
+            context -> Expr aa dd vv -> Expr aa dd vv)
+  -> Expr a d v
+  -> Expr aa dd vv-}
+tformModE cf c fns e = case e of
+  (A ann (Let defs rest)) -> let
+      newDefs =
+        map (\(GenericDef pat body ty) -> let
+                newBody = tformE cf c fns body
+             in (GenericDef pat newBody ty)) defs
+      newRest = tformModE cf c fns rest
+    in A ann $ Let newDefs newRest
+  _ -> e
+
+tformModEverywhere f e = tformModE (\_ _ -> repeat ()) () (cid, cid, cid, \_ -> f) e

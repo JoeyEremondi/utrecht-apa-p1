@@ -87,10 +87,10 @@ optAndPrint source = case Compile.compile "elm-lang" "core" unwrappedBasic sourc
         Right modul -> do
             (modName, _) <- parseDependencies source
             let iface = Module.toInterface modul
-            let (optimizedModul, optIface) = optimizeModule modName (modul, iface)
-            let body = Module.body optimizedModul
+            --let (optimizedModul, optIface) = optimizeModule modName (modul, iface)
+            let body = Module.body modul
             let expr = Module.program $ body
-            Right $ P.render $ pretty expr
+            Right $ show expr
 
         Left docs ->
             map P.render docs

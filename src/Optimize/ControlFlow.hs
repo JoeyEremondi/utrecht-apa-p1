@@ -220,18 +220,21 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
       --of the case expression
       --Those assignments correspond to the expressions in tail-position of the case
       let cases = map snd patCasePairs
-      let caseNodes = map (\tailExpr -> Assign (trace "\n\n\n\nInter" IntermedExpr $ getLabel e) tailExpr) cases
-      let branchNode = Branch e
-      let ourHead = case (headMap `mapGet` (getLabel caseExpr)) of
-            [] -> [Assign (IntermedExpr $ getLabel caseExpr) caseExpr]
-            headList -> headList
-      let ourTail = [Assign (IntermedExpr (getLabel e)) theCase | theCase <- cases]
+      let caseTailExprs = concatMap tailExprs cases 
+      let caseTails =  map (\tailExpr -> Assign (IntermedExpr $ getLabel e) tailExpr ) caseTailExprs
             
-      let caseHeads = concatMap (\cs -> headMap `mapGet` (getLabel cs) ) cases
-      let branchEdges = connectLists (ourHead, [branchNode])
+      let branchNode = Branch e
+      --let ourHead = case (headMap `mapGet` (getLabel caseExpr)) of
+      --      [] -> [Assign (IntermedExpr $ getLabel caseExpr) caseExpr]
+      --      headList -> headList
+      let ourHead = headMap `mapGet` (getLabel caseExpr)
+      let ourTail = [Assign (IntermedExpr (getLabel e)) theCase | theCase <- caseTailExprs]
+            
+      let caseHeads = trace ("####### Got Case Tails " ++ show caseTails ) $concatMap (\cs -> headMap `mapGet` (getLabel cs) ) cases
+      let branchEdges = trace ("####### Got Case heads " ++ show caseHeads ) $ connectLists (ourHead, [branchNode])
       let caseEdges =  connectLists ([branchNode], caseHeads)
 
-      let endEdges = connectLists (caseNodes, ourTail)
+      let endEdges = connectLists (caseTails, ourTail)
       
       return $ (Map.insert (getLabel e) ourHead headMap
         ,Map.insert (getLabel e) ourTail tailMap --Last thing is tail statement of whichever case we take
@@ -282,8 +285,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
       [] -> (trace "Leaf case" ) $ do
         let ourHead = [ExprEval e]
         let ourTail = ourHead
-        return (Map.fromList [(label, ourHead)],
-                Map.fromList [(label, ourTail)],
+        return (Map.insert (getLabel e) ourHead headMap,
+                Map.insert (getLabel e) ourTail tailMap,
                 subEdges) --Means we are a leaf node, no sub-expressions
       _ -> (trace "In fallthrough version of getEdges" ) $ do
         let headLists = Map.elems headMap
@@ -404,4 +407,3 @@ arithVars = [
   ,Variable.Canonical (Variable.Module ["Basics"]) "=="
   ,Variable.Canonical (Variable.Module ["Basics"]) "/="
             ]
-
