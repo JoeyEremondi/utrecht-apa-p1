@@ -51,7 +51,8 @@ getRelevantDefs
            Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)),
            [LabelNode])
 getRelevantDefs  eAnn =
-  let 
+  let
+    --TODO add info for external calls!
     maybeInfo = do
       let expDict = labelDict eAnn
       --let initalEnv = globalEnv eAnn
@@ -64,6 +65,7 @@ getRelevantDefs  eAnn =
                (map (\pat -> FormalParam pat (getLabel fnDef) ) (functionArgPats fnDef)) 
                (ProcEntry fnDef)
                (ProcExit fnDef)
+               (Just $ getLabel fnDef)
               ) finfo) Map.empty defs
       let fnBodies = map (\(GenericDef _ fnDef _ ) -> functionBody fnDef) defs
       (headDicts, tailDicts, edgeListList ) <- unzip3 `fmap` forM fnBodies (allExprEdges fnInfo)

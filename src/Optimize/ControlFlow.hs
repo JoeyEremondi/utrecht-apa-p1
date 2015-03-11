@@ -12,6 +12,7 @@ import qualified Data.Map as Map hiding ((!))
 import qualified Data.Set                   as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
+import AST.Variable (home, Home(..))
 
 import qualified AST.Variable as Variable
 
@@ -67,7 +68,8 @@ data FunctionInfo =
     arity :: Int,
     formalParams :: [VarPlus],
     entryNode :: ControlNode,
-    exitNode :: ControlNode
+    exitNode :: ControlNode,
+    topFnLabel :: Maybe Label
   } -- deriving (Eq, Ord, Show)
 
 
@@ -135,11 +137,13 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo =
     --Function: we have call and return for the call, and evaluating each arg is a mock assignment
     App e1 e2 -> do
       fnName <- functionName e1
-      argList <- argsGiven e1
+      argList <- argsGiven e
       let numArgs = length argList
       thisFunInfo <- Map.lookup fnName fnInfo 
       let fnArity = arity thisFunInfo
-      let inLocalScope = Map.member fnName env
+      let inLocalScope = case (Map.lookup fnName env) of
+            Nothing -> False
+            Just fnLab -> (Just fnLab) == (topFnLabel thisFunInfo)
       let argNodes = paramNodes argList
       let callNode = Call e
       let retNode = Return fnName e
@@ -173,8 +177,9 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo =
                            gotoFormalEdges ++ callEdges ++
                            callEdges ++ returnEdges ++ subEdges ) --TODO app edges
           
-        _ -> Nothing --If function is locally defined, or not fully instantiated, we fail
-    Lambda _ _ -> Nothing
+        _ -> trace ("@@@@@@@@@@ HOF or partial app" ++ (show fnArity) ++ " " ++ (show numArgs) ++ " " ++ show inLocalScope ) $
+          Nothing --If function is locally defined, or not fully instantiated, we fail
+    Lambda _ _ -> trace "@@@@@@@@@@ Tried to create lambda" $ Nothing
     Binop op e1 e2 -> case (isArith op) of
       True -> return (Map.insert (getLabel e) (headMap `mapGet` (getLabel e1)) headMap  
                         , Map.insert (getLabel e) (tailMap `mapGet` (getLabel e2)) headMap

@@ -32,6 +32,6 @@ wholeProgOpts = [Reachability.removeUnreachable
           ]
 
 moduleOpts :: [ModuleOptFun]
-moduleOpts = [ Reachability.removeUnreachableModule
-             ,SDG.removeModuleDeadCode
+moduleOpts = [ --Reachability.removeUnreachableModule
+             SDG.removeModuleDeadCode
              ]

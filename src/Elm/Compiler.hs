@@ -101,7 +101,7 @@ optAndPrint source = case Compile.compile "elm-lang" "core" unwrappedBasic sourc
 testCompile src =
   case (compile "elm-lang" "core" src basicIface ) of
     Right (_, js) -> js
-    Left docs -> error $ "Failed during compiling" 
+    Left docs -> error $ "Failed during compiling" ++  (show  docs)
 
 fromRight (Right x ) = x
 fromRight _ = error "Can't unwrap Right from Left"
