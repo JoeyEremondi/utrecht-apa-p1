@@ -25,7 +25,7 @@ import Debug.Trace (trace)
 import Optimize.ControlFlow
 
 --How long do we let our call strings be?
-contextDepth = 0
+contextDepth = 2
 
 insertAll :: Ord k => [(k,a)] -> Map.Map k a -> Map.Map k a
 insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs  
@@ -33,13 +33,16 @@ insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs
 
 
 getFreeVars :: [ControlNode] ->  [VarPlus]
-getFreeVars nodes = Set.toList $ foldr (
-  \ lnode varsSoFar ->
-    let thisLevelVars = case lnode of
+getFreeVars nodes = let
+    freeVars = Set.toList $ foldr (
+      \ lnode varsSoFar -> let
+        thisLevelVars = case lnode of
           (Assign v _ ) -> [v]
+          (AssignParam v1 v2 _) -> [v1, v2]
           _ -> []
-    in varsSoFar `Set.union` (Set.fromList thisLevelVars)
-  ) Set.empty nodes
+      in varsSoFar `Set.union` (Set.fromList thisLevelVars)
+      ) Set.empty nodes
+  in trace ( "Got free vars " ++ show freeVars) $ freeVars
 
     
 
@@ -114,13 +117,13 @@ isExprRef
   -> LabelNode
   -> (VarPlus, Maybe Label )
   -> Bool
-isExprRef fnInfo exprs lnode (vplus, _) = let
+isExprRef fnInfo exprs lnode (vplus, Just _) = let
     e = case (exprs `mapGet` (getNodeLabel lnode)) of
       (A _ (Let defs body)) -> body --We only look for refs in the body of a let
       ex -> ex
   in case vplus of
       NormalVar v defLabel -> expContainsVar e v 
-      IntermedExpr l -> expContainsLabel e l
+      IntermedExpr l -> trace "@@@@@Intermed Expr" $ expContainsLabel e l
       FormalReturn v ->
         --check if we reference the function called --TODO more advanced?
         (expContainsVar e v) || case (lnode, topFnLabel `fmap` Map.lookup v fnInfo) of
@@ -130,6 +133,7 @@ isExprRef fnInfo exprs lnode (vplus, _) = let
         
       ActualParam l -> expContainsLabel e l
       FormalParam pat _ -> or $ map (expContainsVar e) $ getPatternVars pat
+isExprRef _ _ _ _ = False --If not in "Just" form, we ignore, since is uninitialized variable
 
 makeProgramInfo :: [ControlEdge] -> ProgramInfo LabelNode
 makeProgramInfo edgeList = let

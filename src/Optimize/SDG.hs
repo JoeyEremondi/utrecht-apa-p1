@@ -30,7 +30,6 @@ import Debug.Trace (trace)
 --How deep we go in our call strings for context
 contextDepth = 2
 
-
 data SDGNode = SDGDef VarPlus Label | SDGLabel Label | SDGFunction LabelNode
   deriving (Eq, Ord, Show)
 
@@ -148,10 +147,10 @@ removeDeadCode  targetVars e = case dependencyMap of
       let reachMap = callGraph eAnn
       let domain = map (\d -> map (\l -> SDGFunction (Call l)) d ) $ contextDomain contextDepth reachMap
       let (_,embDefMap) =
-            minFP
+            minFP --(forwardSliceLattice (Set.fromList targetNodes)) (\_ _ x -> x ) pinfo
               (embForwardSliceLat
                  (domain) $ Set.fromList targetNodes)
-              (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo
+               (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo
       let defMap = Map.map (\(EmbPayload _ lhat) -> lhat []) embDefMap 
       return $  (defMap, targetNodes)
 
