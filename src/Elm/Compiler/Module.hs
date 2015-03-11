@@ -31,7 +31,7 @@ type Module = Module.CanonicalModule
 
 
 newtype Name = Name [String]
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 
 
 defaultImports :: [Name]

@@ -4,6 +4,12 @@ module Optimize.EmbellishedMonotone where
 import Optimize.MonotoneFramework
 import Optimize.Types
 import Optimize.ControlFlow
+import           AST.Annotation             (Annotated (..))
+import AST.Expression.General
+import qualified AST.Pattern                as Pattern
+import Optimize.Traversals
+import qualified Data.List as List
+
 
 import qualified Data.Map as Map
 
@@ -73,3 +79,42 @@ liftToFn _ f fret resultMap rnode@(Return _ label) (EmbPayload domain lhat') =
   in EmbPayload domain $ \d -> --We assume they have the same domain 
     fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) )
 liftToFn _ _ _ _ _ lhat = lhat
+
+
+callGraph :: LabeledExpr -> Map.Map Label [Label]
+callGraph (A _ (Let defs _)) =
+  let
+    fnNames = map (\(GenericDef (Pattern.Var n) _ _) -> nameToCanonVar n) defs
+    fnBodies = map (\(GenericDef _ body _) -> functionBody body ) defs
+    fnLabels = map functionLabel defs
+    labelDict = Map.fromList $ zip fnNames fnLabels
+
+    oneLevelCalls () expr subCalls = (concat subCalls) ++ case expr of
+      (A _ (App (A _ (Var fnName)) _)) ->
+        if (Map.member fnName labelDict)
+           then [labelDict Map.! fnName]
+           else []
+      _ -> []
+
+    allCalls = foldE
+      (\_ () -> repeat ())
+      ()
+      (\(GenericDef _ e v) -> [e])
+      oneLevelCalls
+
+    callMap = Map.fromList $ zip fnLabels $ map (\body -> allCalls body) fnBodies
+  in callMap
+
+contextDomain :: Int -> Map.Map Label [Label] -> [[Label]]
+contextDomain n callMap = let
+    allLabels = Map.keys callMap
+  in helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
+  where 
+    helper 0 _ _ = [[]]
+    helper 1 _ accum = accum
+    helper n callMap accum = let
+        oneLevelPaths = [ (l2:l1:callStr) |
+                         (l1:callStr) <- accum,
+                         l2 <- (callMap Map.! l1)]
+        newAccum = List.nub $ accum ++ oneLevelPaths
+      in helper (n-1) callMap newAccum

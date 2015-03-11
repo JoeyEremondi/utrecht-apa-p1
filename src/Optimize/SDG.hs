@@ -23,7 +23,12 @@ import Optimize.EmbellishedMonotone
 import Optimize.ControlFlow
 import Optimize.RelevantDefs
 
+--import Optimize.Reachability (reachabilityMap)
+
 import Debug.Trace (trace)
+
+--How deep we go in our call strings for context
+contextDepth = 2
 
 
 data SDGNode = SDGDef VarPlus Label | SDGLabel Label | SDGFunction LabelNode
@@ -123,11 +128,13 @@ sdgProgInfo names eAnn = do
 setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
 setFromEmb (EmbPayload _ lhat) = unSDG $ lhat []
 
---TODO remove
-testDomain = [[]] 
 
-removeDeadCode :: [Name] -> Canon.Expr -> Canon.Expr
-removeDeadCode targetVars e = case dependencyMap of
+
+removeDeadCode
+  :: [Name]
+    -> Canon.Expr
+    -> Canon.Expr
+removeDeadCode  targetVars e = case dependencyMap of
   Nothing -> error "Failed getting data Dependencies"
   Just (depMap, targetNodes) -> trace ("Got depMap " ++ show depMap) $ toCanonical
        $ removeDefs targetNodes depMap eAnn 
@@ -136,11 +143,12 @@ removeDeadCode targetVars e = case dependencyMap of
     eAnn = annotateCanonical (Map.empty)  (Label []) e
     dependencyMap = do
       (pinfo, targetNodes) <- sdgProgInfo targetVars eAnn
+      let reachMap = callGraph eAnn
+      let domain = map (\d -> map (\l -> SDGFunction (Call l)) d ) $ contextDomain contextDepth reachMap
       let (_,embDefMap) =
             minFP
-              (embForwardSliceLat testDomain $ Set.fromList targetNodes) --TODO embellished
-              --(forwardSliceLattice $ Set.fromList targetNodes)
-              --(\ _ _ x -> x) pinfo
+              (embForwardSliceLat
+                 (domain) $ Set.fromList targetNodes)
               (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo
       let defMap = Map.map (\(EmbPayload _ lhat) -> lhat []) embDefMap 
       return $  (defMap, targetNodes)
@@ -182,9 +190,10 @@ defIsRelevant targetNodes reachedNodesMap def@(GenericDef pat expr _ty) = let
 
 removeModuleDeadCode :: ModuleOptFun
 removeModuleDeadCode modName (modul, iface) = let
-    isValue value = case value of
+    
+    isValue value = case value of--TODO remove
       Variable.Value s -> True
       _ -> False
     valToName (Variable.Value s) = Name [s]
-    names = map valToName $ filter isValue $ Module.iExports iface  
+    names = map valToName $ filter isValue $ Module.iExports iface
   in (tformModule (removeDeadCode names) modul, iface)

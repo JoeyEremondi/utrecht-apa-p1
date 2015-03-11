@@ -1,10 +1,10 @@
-module Optimize.Reachability (removeUnreachable, removeUnreachableModule) where
+module Optimize.Reachability (removeUnreachable, removeUnreachableModule, reachabilityMap) where
 
 import Optimize.MonotoneFramework
 
 import Elm.Compiler.Module
 import qualified AST.Module as Module
-import qualified Data.Map as Map
+import qualified Data.Map as Map hiding ((!))
 import AST.Expression.General
 import qualified AST.Expression.Canonical as Canon
 import AST.Annotation
@@ -14,8 +14,14 @@ import Optimize.Traversals
 
 import Optimize.Types
 
+import Debug.Trace (trace)
+
 newtype IsReachable = IsReachable {fromReachable :: Bool}
   deriving (Eq, Ord, Show)
+
+mapGet m k = case (Map.lookup k m) of
+  Just e -> e
+  Nothing -> error $ "Couldn't find elem " ++ show k ++ " in map " ++ show m
 
 reachingJoin :: IsReachable -> IsReachable -> IsReachable
 reachingJoin a b = IsReachable (fromReachable a || fromReachable b )
@@ -62,11 +68,12 @@ makeProgramInfo :: [Name] -> [(Name, Module)] -> ProgramInfo Var.Canonical
 makeProgramInfo targets mods = ProgramInfo (eMap) allLabs labPairs isExtr
   where
     targetVars = map nameToVar targets
-    eMap  = \var -> referencedTopLevels (Map.empty) (allLabelsMap Map.! var)
+    eMap  = \var -> referencedTopLevels (Map.empty) (allLabelsMap `mapGet` var)
     allLabelBodies = concatMap (\(name, mod) -> topLevelDefs name $ Module.program $ Module.body mod) mods
     allLabelsMap = Map.fromList allLabelBodies
     allLabs = map fst allLabelBodies
-    labPairs = [(l,l') | l <- allLabs, l' <- eMap l]
+    labPairs = [(l,l') | l <- allLabs, l' <- eMap l, l' `elem` allLabs] --Ignore external calls, if they're not defined, allows us to do single-module analysis
+    --TODO bad design?
     isExtr var = var `elem` targetVars
 
 transferFun :: Map.Map Var.Canonical IsReachable -> Var.Canonical -> IsReachable -> IsReachable
@@ -76,9 +83,12 @@ findReachable :: [Name] -> [(Name, Module)] -> Map.Map Var.Canonical IsReachable
 findReachable targets mods = snd $ minFP isReachableLattice transferFun
                              $ makeProgramInfo targets mods
 
+reachabilityMap :: [Name] -> [(Name, Module)] -> Map.Map Var.Canonical Bool
+reachabilityMap names mods = Map.map (fromReachable) $ findReachable names mods
+
 --A variable can stay if it's not a TLD, or if it is reachable
 canStay :: Name -> Map.Map Var.Canonical IsReachable -> Canon.Def -> Bool
-canStay name reachMap (Canon.Definition pat _ _) =
+canStay name reachMap (Canon.Definition pat _ _) = trace "canStay " $
                           let
                             varCanStay var = case Map.lookup var reachMap of
                               Nothing -> True
@@ -86,21 +96,24 @@ canStay name reachMap (Canon.Definition pat _ _) =
                               Just (IsReachable True) -> True
                           in or $ map varCanStay (map (addContext name) $ getPatternVars pat)
 
+--Remove unreachable definitions from our top-level expression
 fixDef :: Map.Map Var.Canonical IsReachable -> Name -> Canon.Expr -> Canon.Expr
-fixDef reachMap name (A a (Let defs body)) = A a $ Let (filter (canStay name reachMap) defs) body
+fixDef reachMap name (A a (Let defs body)) = trace " Fixing def" $
+  A a $ Let (filter (canStay name reachMap) defs) body
 fixDef _ _ exp = exp
 
 --TODO avoid recomputing?
 removeUnreachable :: [Name] -> Map.Map Name (Module, Interface) -> Map.Map Name (Module, Interface)
-removeUnreachable targets mods =
+removeUnreachable targets mods = trace "Remove Unreachable " $
   let
-    dictPairs = Map.toList mods
-    inPairs = map (\(name, (mod, _)) -> (name, mod)) $ dictPairs
+    --dictPairs = Map.toList mods
+    inPairs = Map.toList $ Map.map fst mods
     reachMap = findReachable targets inPairs
     outPairs = map (\(name, mod) -> (name, (tformModule (fixDef reachMap name))  mod)) inPairs
-  in error "" -- Map.fromList $ map
-     (\(_, (_, iface)) (name, mod) -> (name, (mod, iface)))
-     $ zip dictPairs outPairs
+    --outDict = Map.fromList outPairs
+    ifaceDict = Map.map snd mods
+    outWithIface = map (\(name, mod) -> (name, (mod, ifaceDict `mapGet` name) )) outPairs
+  in Map.fromList outWithIface
 
 
 removeUnreachableModule :: Name -> (Module, Interface) -> (Module, Interface)
