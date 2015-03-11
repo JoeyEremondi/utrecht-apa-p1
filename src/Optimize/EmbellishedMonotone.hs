@@ -25,19 +25,27 @@ liftJoin lat = \(EmbPayload domain1 x) (EmbPayload domain2 y) ->
   EmbPayload (domain1 ++ domain2) $ \ d -> (latticeJoin lat) (x d) (y d)
 -}
 
+fnEquality
+  :: (Eq payload)
+  => EmbPayload d payload
+  -> EmbPayload d payload -> Bool
+fnEquality (EmbPayload domain lhat) (EmbPayload _ lhat') = (map ( lhat $ ) domain) == (map (lhat' $ ) domain)
 
 liftToEmbellished
-  :: (EmbPayload d payload)
+  :: (Eq payload)
+  => [[d]]
+  -> (EmbPayload d payload)
   -> Lattice payload
   -> Lattice (EmbPayload d payload)
-liftToEmbellished iotaVal lat =
-  Lattice {
+liftToEmbellished domain iotaVal lat =
+  let
+    embJoin = \ (EmbPayload _ x) (EmbPayload _ y)
+                  -> EmbPayload domain $ \d -> (latticeJoin lat) (x d) (y d)
+  in Lattice {
     latticeBottom = EmbPayload [] $ \_ -> latticeBottom lat,
-    latticeJoin = \ (EmbPayload domain1 x) (EmbPayload domain2 y)
-                  -> EmbPayload (domain1 ++ domain2) $ \d -> (latticeJoin lat) (x d) (y d),
+    latticeJoin = embJoin,
     iota = iotaVal,
-    lleq = \(EmbPayload domain1 x) (EmbPayload domain2 y) ->
-      and $ map (\d -> (lleq lat) (x d) (y d) ) (domain1 ++ domain2),
+    lleq = \x y -> fnEquality (embJoin x y) y,
     flowDirection = flowDirection lat
   }
 
@@ -61,7 +69,7 @@ liftToFn Lattice{..} f  _fret resultMap (Call label) (EmbPayload domain lhat) =
                    else error "Invalid call-string"
 liftToFn _ f fret resultMap rnode@(Return _ label) (EmbPayload domain lhat') =
   let
-    (EmbPayload domain2 lhat) = (resultMap Map.! (Call label) )
-  in EmbPayload (domain ++ domain2) $ \d -> 
+    (EmbPayload _ lhat) = (resultMap Map.! (Call label) )
+  in EmbPayload domain $ \d -> --We assume they have the same domain 
     fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) )
 liftToFn _ _ _ _ _ lhat = lhat

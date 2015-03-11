@@ -52,8 +52,8 @@ forwardSliceLattice startDefs = Lattice {
   flowDirection = BackwardAnalysis
   }
 
-embForwardSliceLat startDefs  =
-  liftToEmbellished (EmbPayload [] $ \d -> case d of
+embForwardSliceLat domain startDefs  =
+  liftToEmbellished domain (EmbPayload domain $ \d -> case d of
                         [] -> SDG startDefs 
                         _ -> SDG Set.empty) $ forwardSliceLattice startDefs
 
@@ -123,6 +123,9 @@ sdgProgInfo names eAnn = do
 setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
 setFromEmb (EmbPayload _ lhat) = unSDG $ lhat []
 
+--TODO remove
+testDomain = [[]] 
+
 removeDeadCode :: [Name] -> Canon.Expr -> Canon.Expr
 removeDeadCode targetVars e = case dependencyMap of
   Nothing -> error "Failed getting data Dependencies"
@@ -131,23 +134,25 @@ removeDeadCode targetVars e = case dependencyMap of
     -- $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where
     eAnn = annotateCanonical (Map.empty)  (Label []) e
-    --toDefSet depMap targetNodes = trace "Makign def set " $ let
-    --    defsReachingTargets =
-    --      trace ( "DefsReachingTargets " ++ (show depMap ) ) $ Set.unions [setFromEmb (depMap `mapGet` tnode) | tnode <- targetNodes]
-    --  in defsReachingTargets
     dependencyMap = do
-      (pinfo, targetNodes) <- trace "Got SDG info" $  sdgProgInfo targetVars eAnn
-      let (_,defMap) =
+      (pinfo, targetNodes) <- sdgProgInfo targetVars eAnn
+      let (_,embDefMap) =
             minFP
-              -- (embForwardSliceLat $ Set.fromList targetNodes) --TODO embellished
-              (forwardSliceLattice $ Set.fromList targetNodes)
-              (\ _ _ x -> x) pinfo
-              -- (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo 
+              (embForwardSliceLat testDomain $ Set.fromList targetNodes) --TODO embellished
+              --(forwardSliceLattice $ Set.fromList targetNodes)
+              --(\ _ _ x -> x) pinfo
+              (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo
+      let defMap = Map.map (\(EmbPayload _ lhat) -> lhat []) embDefMap 
       return $  (defMap, targetNodes)
-    removeDefs targetNodes depMap (A ann (Let defs body)) =
+
+--Given a set of target nodes, a map from nodes to other nodes depending on that node,
+--And a module's expression, traverse the tree and remove unnecessary Let definitions
+removeDefs targetNodes depMap (A ann (Let defs body)) =
       A ann $ Let (map (\(GenericDef pat bdy ty) -> GenericDef pat (removeDefsInBody targetNodes depMap bdy) ty )
            defs) body  
-    removeDefsInBody targetNodes depMap = trace ("Removing with dep depMap " ++ show depMap ) $
+
+
+removeDefsInBody targetNodes depMap = trace ("Removing with dep depMap " ++ show depMap ) $
       tformEverywhere (\(A ann@(_,lab,_) eToTrans) ->
         case eToTrans of
           Let defs body -> A ann $ Let (filter (defIsRelevant targetNodes depMap ) defs) body

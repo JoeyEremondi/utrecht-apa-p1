@@ -177,15 +177,16 @@ genericDefVars (GenericDef p _ _) = getPatternVars p
 
 
 embellishedRD
-  :: Set.Set RDef
+  :: [[LabelNode]]
+  -> Set.Set RDef
   -> Lattice (EmbPayload LabelNode ReachingDefs)
-embellishedRD iotaVal  =
+embellishedRD domain iotaVal  =
   let
     lat = (reachingDefsLat iotaVal)
     liftedIota = EmbPayload [[]] (\ d -> case d of
                                    [] -> ReachingDefs iotaVal
                                    _ -> latticeBottom lat)
-  in liftToEmbellished liftedIota lat
+  in liftToEmbellished domain liftedIota lat
 
 returnTransfer :: (LabelNode, LabelNode) -> (ReachingDefs, ReachingDefs) -> ReachingDefs
 returnTransfer (lc, lr) (ReachingDefs aCall, ReachingDefs  aRet ) =
