@@ -59,7 +59,8 @@ naiveLift :: (label -> payload -> payload) -> (label -> ( d -> payload) -> (d ->
 naiveLift f lab lhat = (f lab) . lhat
 
 liftToFn
-  :: Lattice (payload) --Our embellished lattice
+  :: Int
+  -> Lattice (payload) --Our embellished lattice
   -> (Map.Map LabelNode payload -> LabelNode -> payload -> payload) --Original transfer function
   -> ((LabelNode, LabelNode) -> (payload, payload) -> payload) --special 2-value return function
   -> Map.Map LabelNode (EmbPayload LabelNode payload)
@@ -67,20 +68,20 @@ liftToFn
   -> (EmbPayload LabelNode payload)
   -> (EmbPayload LabelNode payload)
 
-liftToFn Lattice{..} f  _fret resultMap (Call label) (EmbPayload domain lhat) =
+liftToFn depth lat@Lattice{..} f  _fret resultMap (Call label) (EmbPayload domain lhat) =
   EmbPayload domain $ \d -> case d of
     [] -> latticeBottom
-    ( lc@(Call lcn) : dRest) -> if (lcn == label)
-                   then f (Map.map (\(EmbPayload domain lh) -> lh d ) resultMap) lc (lhat d)
-                   else error "Invalid call-string"
-liftToFn _ f fret resultMap rnode@(Return _ label) (EmbPayload domain lhat') =
+    ( lc:dRest) -> let
+          possibleEnds = [ldom | ldom <- domain, (take depth (lc:ldom)) == (lc:dRest) ]
+        in joinAll lat [lhat dPoss | dPoss <- possibleEnds]
+liftToFn _ _ f fret resultMap rnode@(Return _ label) (EmbPayload domain lhat') =
   let
     (EmbPayload _ lhat) = (resultMap Map.! (Call label) )
   in EmbPayload domain $ \d -> --We assume they have the same domain 
     fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) )
-liftToFn _ _ _ _ _ lhat = lhat
+liftToFn _ _ _ _ _ _ lhat = lhat
 
-
+--TODO need reverse graph?
 callGraph :: LabeledExpr -> Map.Map Label [Label]
 callGraph (A _ (Let defs _)) =
   let

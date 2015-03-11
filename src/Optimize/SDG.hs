@@ -71,10 +71,12 @@ transferFun
   -> SDGNode
   -> EmbPayload SDGNode SDG
   -> EmbPayload SDGNode SDG
-transferFun Lattice{..} resultDict lnode lhat@(EmbPayload domain pl) = case lnode of
+transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload domain pl) = case lnode of
   SDGFunction (Call l) -> EmbPayload domain (\d -> case d of
     [] -> latticeBottom
-    lc:d' -> pl d')
+    lc:d' -> let
+        possibleEnds = [ldom | ldom <- domain, (take contextDepth (lc:ldom)) == (lc:d') ]
+      in joinAll lat [pl dPoss | dPoss <- possibleEnds])
   SDGFunction (Return fn l) -> let 
       (EmbPayload domain2 lcall) = resultDict `mapGet` (SDGFunction $ Call l)
     in EmbPayload (domain ++ domain2) $ \d ->

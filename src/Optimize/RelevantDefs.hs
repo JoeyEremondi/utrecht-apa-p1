@@ -24,6 +24,9 @@ import Debug.Trace (trace)
 
 import Optimize.ControlFlow
 
+--How long do we let our call strings be?
+contextDepth = 2
+
 insertAll :: Ord k => [(k,a)] -> Map.Map k a -> Map.Map k a
 insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs  
 
@@ -81,14 +84,16 @@ getRelevantDefs  eAnn =
     Nothing -> Nothing
     Just (pinfo, allNodes, expDict, targetNodes) ->
       let
+        reachMap = callGraph eAnn
+        domain = map (\d -> map Call d) $ contextDomain contextDepth reachMap
         freeVars = trace ("Getting free vars, length pinfo edges " ++ show (length $ labelPairs pinfo )) $ getFreeVars allNodes
         iotaVal = Set.fromList [ (x, Nothing) | x <- freeVars]
-        --ourLat = trace "Making lattice" $ embellishedRD iotaVal
-        ourLat = reachingDefsLat iotaVal
-        (_, theDefsHat) = minFP ourLat transferFun pinfo
-        -- (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
-        -- theDefs = trace "got fp defs" $ Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
-        theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
+        ourLat = embellishedRD domain  iotaVal
+        --ourLat = reachingDefsLat iotaVal
+        --(_, theDefsHat) = minFP ourLat transferFun pinfo
+        (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
+        theDefs = trace "got fp defs" $ Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
+        --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = Map.mapWithKey
                        (\x (ReachingDefs s) ->
                          Set.filter (isExprRef expDict x) s) theDefs
@@ -199,4 +204,4 @@ liftedTransfer
   -> LabelNode
   -> (EmbPayload LabelNode  ReachingDefs)
   -> (EmbPayload LabelNode  ReachingDefs)
-liftedTransfer iotaVal = liftToFn (reachingDefsLat iotaVal) transferFun returnTransfer
+liftedTransfer iotaVal = liftToFn contextDepth (reachingDefsLat iotaVal) transferFun returnTransfer
