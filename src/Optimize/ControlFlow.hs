@@ -80,8 +80,8 @@ type ControlEdge = (ControlNode, ControlNode)
 
 
 
-getLabel :: LabeledExpr -> Label
-getLabel (A (_,l,_) _) = l
+--getLabel :: LabeledExpr -> Label
+--getLabel (A (_,l,_) _) = l
 
 
 --For a fuction parameter, we treat each tail-position expression in the parameter

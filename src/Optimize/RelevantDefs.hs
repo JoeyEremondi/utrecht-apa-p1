@@ -25,7 +25,7 @@ import Debug.Trace (trace)
 import Optimize.ControlFlow
 
 --How long do we let our call strings be?
-contextDepth = 2
+contextDepth = 0
 
 insertAll :: Ord k => [(k,a)] -> Map.Map k a -> Map.Map k a
 insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs  
@@ -42,7 +42,7 @@ getFreeVars nodes = let
           _ -> []
       in varsSoFar `Set.union` (Set.fromList thisLevelVars)
       ) Set.empty nodes
-  in trace ( "Got free vars " ++ show freeVars) $ freeVars
+  in  freeVars
 
     
 
@@ -92,18 +92,18 @@ getRelevantDefs  eAnn =
       let
         reachMap = callGraph eAnn
         domain = map (\d -> map Call d) $ contextDomain contextDepth reachMap
-        freeVars = trace ("Getting free vars, length pinfo edges " ++ show (length $ labelPairs pinfo )) $ getFreeVars allNodes
+        freeVars = getFreeVars allNodes
         iotaVal = Set.fromList [ (x, Nothing) | x <- freeVars]
-        --ourLat = embellishedRD domain  iotaVal
-        ourLat = reachingDefsLat iotaVal
-        (_, theDefsHat) = minFP ourLat transferFun pinfo
-        --(_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
-        --theDefs = trace "got fp defs" $ Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
-        theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
+        ourLat = embellishedRD domain  iotaVal
+        --ourLat = reachingDefsLat iotaVal
+        --(_, theDefsHat) = minFP ourLat transferFun pinfo
+        (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
+        theDefs = trace ("\ngot fp defs" ++ show theDefsHat ) $ Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
+        --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = Map.mapWithKey
                        (\x (ReachingDefs s) ->
                          Set.filter (isExprRef fnInfo expDict x) s) theDefs
-      in trace ("Return of RD " ++ show relevantDefs ) $ Just (pinfo, relevantDefs, targetNodes)
+      in trace ("TheDefs " ++ show theDefs )$ Just (pinfo, relevantDefs, targetNodes)
 
 instance Show (ProgramInfo LabelNode) where
   show (ProgramInfo { edgeMap = pinfo_edgeMap,
@@ -124,7 +124,7 @@ isExprRef fnInfo exprs lnode (vplus, Just _) = let
       ex -> ex
   in case vplus of
       NormalVar v defLabel -> expContainsVar e v 
-      IntermedExpr l -> trace "@@@@@Intermed Expr" $ expContainsLabel e l
+      IntermedExpr l ->  expContainsLabel e l
       FormalReturn v ->
         --check if we reference the function called --TODO more advanced?
         (expContainsVar e v) || case (lnode, topFnLabel `fmap` Map.lookup v fnInfo) of
@@ -148,7 +148,7 @@ makeProgramInfo edgeList = let
     edgeFn = (\node ->  edgeMap `mapGet` node)
     isExtremal (GlobalEntry) = True
     isExtremal _ = False --TODO entry or exit? Forward or backward?
-  in trace ("!!!!!!!!!All labels " ++ show (allLabels) ) $ ProgramInfo edgeFn allLabels labelEdges isExtremal
+  in ProgramInfo edgeFn allLabels labelEdges isExtremal
 
 type RDef = (VarPlus, Maybe Label) 
 
@@ -168,18 +168,21 @@ reachingDefsLat iotaVal =  Lattice {
   }
 
 
-
-removeKills (Assign var label) aIn = Set.filter (not . isKilled) aIn
-  where isKilled (setVar, setLab) = (setVar == var)
+removeKills :: LabelNode -> Set.Set RDef -> Set.Set RDef
+removeKills (Assign var _label) aIn = Set.filter (not . isKilled) aIn
+  where isKilled (setVar, _setLab) = (setVar == var)
 --Return is a special case, because there's an implicit unnamed variable we write to
-removeKills (Return fnVar label) aIn = Set.filter (not . isKilled) aIn
-  where isKilled (setVar, setLab) = (setVar == IntermedExpr label)
+--removeKills (Return _fnVar label) aIn = Set.filter (not . isKilled) aIn
+--  where isKilled (setVar, _setLab) = (setVar == IntermedExpr label)
+removeKills (AssignParam var _ _label) aIn = Set.filter (not . isKilled) aIn
+  where isKilled (setVar, _setLab) = (setVar == var)
 removeKills _ aIn = aIn
 
 --TODO special case for return in ref-set
 
 gens :: LabelNode -> Set.Set RDef
-gens (Assign var label) = trace ("$$$ In Gens for " ++ show label ) $ Set.singleton (var, Just label)
+gens (Assign var label) = Set.singleton (var, Just label)
+gens (AssignParam var _ label) = Set.singleton (var, Just label)
 gens _ = Set.empty
 
 
@@ -187,7 +190,7 @@ gens _ = Set.empty
 --Transfer function for reaching definitions, we find the fixpoint for this
 transferFun :: Map.Map LabelNode ReachingDefs -> LabelNode -> ReachingDefs -> ReachingDefs
 transferFun labMap cfgNode (ReachingDefs aIn) =
-  ReachingDefs $ (removeKills cfgNode aIn) `Set.union` (trace ("$$$ Got gens " ++ (show $ gens cfgNode) ) $ gens cfgNode)
+  ReachingDefs $ (removeKills cfgNode aIn) `Set.union` (gens cfgNode)
 
 
 genericDefVars :: GenericDef a Var -> [Var]
@@ -202,14 +205,11 @@ embellishedRD
 embellishedRD domain iotaVal  =
   let
     lat = (reachingDefsLat iotaVal)
-    liftedIota = EmbPayload [[]] (\ d -> case d of
-                                   [] -> ReachingDefs iotaVal
-                                   _ -> latticeBottom lat)
-  in liftToEmbellished domain liftedIota lat
+  in trace ("Lifting with domain "  ++ show domain)$ liftToEmbellished domain (ReachingDefs iotaVal) lat
 
 returnTransfer :: (LabelNode, LabelNode) -> (ReachingDefs, ReachingDefs) -> ReachingDefs
 returnTransfer (lc, lr) (ReachingDefs aCall, ReachingDefs  aRet ) =
-  ReachingDefs $ (removeKills lr (removeKills lc aCall))
+  ReachingDefs $ (removeKills lr (removeKills lc (aCall `Set.union` aRet )))
     `Set.union` (gens lc) `Set.union` (gens lr) 
 
 liftedTransfer

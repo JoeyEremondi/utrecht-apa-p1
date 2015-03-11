@@ -15,10 +15,11 @@ import qualified Data.Map as Map
 
 data EmbPayload a b = EmbPayload [[a]] ([a] -> b)
 
-instance (Show b) => Show (EmbPayload a b)
+instance (Show b, Show a) => Show (EmbPayload a b)
   where
     show (EmbPayload domain lhat) =
-      concatMap (\ d -> show $ lhat d) domain
+      (List.intercalate " ;; " $
+        map (\ d -> (show d) ++ " -> " ++ (show $ lhat d)) domain) ++ "\n"
       
 
 {-
@@ -40,7 +41,7 @@ fnEquality (EmbPayload domain lhat) (EmbPayload _ lhat') = (map ( lhat $ ) domai
 liftToEmbellished
   :: (Eq payload)
   => [[d]]
-  -> (EmbPayload d payload)
+  -> payload
   -> Lattice payload
   -> Lattice (EmbPayload d payload)
 liftToEmbellished domain iotaVal lat =
@@ -50,7 +51,7 @@ liftToEmbellished domain iotaVal lat =
   in Lattice {
     latticeBottom = EmbPayload [] $ \_ -> latticeBottom lat,
     latticeJoin = embJoin,
-    iota = iotaVal,
+    iota = EmbPayload domain $ \d -> if (null d) then iotaVal else latticeBottom lat,
     lleq = \x y -> fnEquality (embJoin x y) y,
     flowDirection = flowDirection lat
   }
@@ -68,18 +69,22 @@ liftToFn
   -> (EmbPayload LabelNode payload)
   -> (EmbPayload LabelNode payload)
 
-liftToFn depth lat@Lattice{..} f  _fret resultMap (Call label) (EmbPayload domain lhat) =
+liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload domain lhat) =
   EmbPayload domain $ \d -> case d of
     [] -> latticeBottom
     ( lc:dRest) -> let
           possibleEnds = [ldom | ldom <- domain, (take depth (lc:ldom)) == (lc:dRest) ]
-        in joinAll lat [lhat dPoss | dPoss <- possibleEnds]
-liftToFn _ _ f fret resultMap rnode@(Return _ label) (EmbPayload domain lhat') =
+        in if (Call label == lc)
+           then joinAll lat [lhat dPoss | dPoss <- possibleEnds]
+           else joinAll lat [lhat dPoss | dPoss <- possibleEnds] --error "Invalid call string"
+liftToFn _ _ _f fret resultMap rnode@(Return _ label) (EmbPayload domain lhat') =
   let
     (EmbPayload _ lhat) = (resultMap Map.! (Call label) )
   in EmbPayload domain $ \d -> --We assume they have the same domain 
     fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) )
-liftToFn _ _ _ _ _ _ lhat = lhat
+liftToFn _ _ f _ resultMap lnode (EmbPayload domain lhat) = let
+    simpleMap = (error "Shouldn't use resultMap in non lifted this case" )
+  in EmbPayload domain $ \d -> (f simpleMap lnode) (lhat d)
 
 --TODO need reverse graph?
 callGraph :: LabeledExpr -> Map.Map Label [Label]

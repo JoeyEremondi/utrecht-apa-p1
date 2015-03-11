@@ -57,9 +57,7 @@ forwardSliceLattice startDefs = Lattice {
   }
 
 embForwardSliceLat domain startDefs  =
-  liftToEmbellished domain (EmbPayload domain $ \d -> case d of
-                        [] -> SDG startDefs 
-                        _ -> SDG Set.empty) $ forwardSliceLattice startDefs
+  liftToEmbellished domain (SDG startDefs) (forwardSliceLattice startDefs)
 
 --Our transfer funciton is basically the identity,
 --With the necessary lifting dealing with function return and call
@@ -112,8 +110,8 @@ sdgProgInfo names eAnn = do
     --If n1 depends on def at label lab, then we have lab -> n1 as dependency
     --TODO is this right?
     --let dataEdges = map (\(n1, lab) -> (SDGLabel lab, toSDG n1)  ) relevantDefEdges
-    let allEdges = trace ("Got relevant defs " ++ show relevantDefs) callEdges ++ controlEdges ++ dataEdges
-    let sdgTargets = trace ("SDG Edges: " ++ show allEdges) $ makeTargetSet $ Set.fromList targetNodes
+    let allEdges =  callEdges ++ controlEdges ++ dataEdges
+    let sdgTargets = makeTargetSet $ Set.fromList targetNodes
     let pinfo =
           ProgramInfo {
             edgeMap = \lnode -> [l2 | (l1, l2) <- allEdges, l1 == lnode], --TODO make faster
@@ -124,7 +122,7 @@ sdgProgInfo names eAnn = do
               in isTarget
           }
     
-    return $ trace ("SDG Edges: " ++ show allEdges) $ (pinfo, Set.toList sdgTargets)
+    return (pinfo, Set.toList sdgTargets)
 
 setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
 setFromEmb (EmbPayload _ lhat) = unSDG $ lhat []
@@ -137,7 +135,7 @@ removeDeadCode
     -> Canon.Expr
 removeDeadCode  targetVars e = case dependencyMap of
   Nothing -> error "Failed getting data Dependencies"
-  Just (depMap, targetNodes) -> trace ("Got depMap " ++ show depMap) $ toCanonical
+  Just (depMap, targetNodes) -> toCanonical
        $ removeDefs targetNodes depMap eAnn 
     -- $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where

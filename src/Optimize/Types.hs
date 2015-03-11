@@ -70,8 +70,8 @@ type LabeledExpr = AExpr (Region, Label, Env Label)
 type LabeledExpr' = AExpr' (Region, Label, Env Label)
                         
 --Basic getter for labels
-label :: LabeledExpr -> Label
-label (Annotate.A (_,a,_) _) = a
+getLabel :: LabeledExpr -> Label
+getLabel (Annotate.A (_,a,_) _) = a
 
 --deriving instance Show LabeledExpr'
 --deriving instance Show LabeledExpr

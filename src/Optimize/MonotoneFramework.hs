@@ -19,9 +19,9 @@ import qualified Data.Set as Set
 import qualified Data.Map as Map
 --import qualified Data.Array as Array
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 --TODO remove
-trace _ x = x
+--trace _ x = x
 
 --Wrapper for a control flow graph
 --newtype CFG block = CFG (Set.Set (block, block))
