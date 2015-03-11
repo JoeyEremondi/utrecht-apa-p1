@@ -24,7 +24,7 @@ import Debug.Trace (trace)
 
 --Type for variables or some "special cases"
 data VarPlus =
-  NormalVar Var
+  NormalVar Var Label
   | IntermedExpr Label
   | FormalReturn Var
   | ActualParam Label
@@ -141,7 +141,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo =
       let numArgs = length argList
       thisFunInfo <- Map.lookup fnName fnInfo 
       let fnArity = arity thisFunInfo
-      let inLocalScope = case (Map.lookup fnName env) of
+      let inLocalScope = trace "Env look 1" $ case (Map.lookup fnName env) of
             Nothing -> False
             Just fnLab -> (Just fnLab) == (topFnLabel thisFunInfo)
       let argNodes = paramNodes argList
@@ -231,7 +231,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo =
       --the let statement
       --Those assignments correspond to the expressions in tail-position of the body
       let orderedDefs = defs --TODO sort these
-      let getDefAssigns (GenericDef pat b _) = concatMap (varAssign pat) $ tailExprs b
+      let getDefAssigns (GenericDef pat b _) = trace "DefAssigns" $ concatMap (varAssign label pat) $ tailExprs b
       let defAssigns = map getDefAssigns orderedDefs
       --let bodyAssigns = map (tailAssign $ getLabel e) $ tailExprs body
 
@@ -295,7 +295,9 @@ functionDefEdges
   -> Maybe [ControlEdge]
 functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label,_) _) _ty ) = trace "Getting Function Edges " $ do
   let body = functionBody e
-  let argPats = (functionArgPats e) 
+  let argPats = (functionArgPats e)
+  let argLabels = (functionArgLabels e)
+  let argPatLabels = zip argPats argLabels
   let argVars = concatMap getPatternVars argPats 
   let ourHead = ProcEntry e
   let ourTail = [ProcExit e]
@@ -303,8 +305,8 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   let tailNodes = concatMap (\e -> tailMap `mapGet` (getLabel e) ) bodyTails 
   let assignReturns = [Assign (FormalReturn (nameToCanonVar name) ) body]
   let assignParams =
-        [(AssignParam (FormalParam pat label) (NormalVar v) body) |
-           pat <- argPats, v <- argVars]
+        [(AssignParam (FormalParam pat label) (NormalVar v argLab) body) |
+           (pat,argLab) <- argPatLabels, v <- argVars]
   let startEdges = [(ourHead, head assignParams )]
   let assignFormalEdges = zip (init assignParams) (tail assignParams)
   let assignReturnEdges = connectLists (tailNodes, assignReturns)
@@ -314,8 +316,8 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   return $ startEdges ++ assignFormalEdges ++ assignReturnEdges ++ fnExitEdges ++ gotoBodyEdges
   
     
-varAssign :: Pattern -> LabeledExpr -> [ControlNode]
-varAssign pat e = [Assign (NormalVar pvar) e |
+varAssign :: Label -> Pattern -> LabeledExpr -> [ControlNode]
+varAssign defLabel pat e = [Assign (NormalVar pvar defLabel  ) e |
                    pvar <- getPatternVars pat]
 
 
@@ -335,6 +337,10 @@ functionLabel (GenericDef _ body _) = case functionBody body of
 functionArgPats :: LabeledExpr -> [Pattern]
 functionArgPats (A _ (Lambda pat e)) = [pat] ++ (functionArgPats e)
 functionArgPats _ = []
+
+functionArgLabels :: LabeledExpr -> [Label]
+functionArgLabels (A (_,l,_) (Lambda pat e)) = [l] ++ (functionArgLabels e)
+functionArgLabels _ = []
 
 getArity :: LabeledExpr -> Int
 getArity (A _ (Lambda _ e)) = 1 + (getArity e)

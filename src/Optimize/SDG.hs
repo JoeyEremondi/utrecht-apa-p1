@@ -122,7 +122,7 @@ sdgProgInfo names eAnn = do
             labelPairs = allEdges,
             isExtremal = \lnode -> let
                 isTarget = lnode `Set.member` sdgTargets
-              in trace ("Is Extremal? " ++ show lnode ++ " targets " ++ show sdgTargets ++ "ismember " ++ show isTarget ) $ isTarget
+              in isTarget
           }
     
     return (pinfo, Set.toList sdgTargets)
@@ -163,9 +163,9 @@ removeDefs targetNodes depMap (A ann (Let defs body)) =
 
 
 removeDefsInBody targetNodes depMap = trace ("Removing with dep depMap " ++ show depMap ) $
-      tformEverywhere (\(A ann@(_,lab,_) eToTrans) ->
+      tformEverywhere (\(A ann@(_,defLab,_env) eToTrans) ->
         case eToTrans of
-          Let defs body -> A ann $ Let (filter (defIsRelevant targetNodes depMap ) defs) body
+          Let defs body -> A ann $ Let (filter (defIsRelevant defLab targetNodes depMap ) defs) body
           _ -> A ann eToTrans )
     --TODO treat each def as separate
 
@@ -174,10 +174,10 @@ removeDefsInBody targetNodes depMap = trace ("Removing with dep depMap " ++ show
 --Given a list of target nodes,
 -- a mapping of nodes to nodes they are relevant to (result of our FP iteration)
 -- and a Definition, return true if we should keep the definition
-defIsRelevant :: [SDGNode] -> Map.Map SDGNode SDG -> LabelDef -> Bool
-defIsRelevant targetNodes reachedNodesMap def@(GenericDef pat expr _ty) = let
+defIsRelevant :: Label -> [SDGNode] -> Map.Map SDGNode SDG -> LabelDef -> Bool
+defIsRelevant defLabel targetNodes reachedNodesMap def@(GenericDef pat expr _ty) = let
         definedVars = getPatternVars pat
-        definedVarPlusses = map (\v -> NormalVar $  v) definedVars
+        definedVarPlusses = map (\v -> NormalVar v defLabel) definedVars
         nodesForDefs = map (\var -> SDGDef var (getLabel expr)) definedVarPlusses
         reachedNodes = Set.unions $
           map (\varNode -> case (reachedNodesMap `mapGet` varNode) of

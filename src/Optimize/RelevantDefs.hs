@@ -25,7 +25,7 @@ import Debug.Trace (trace)
 import Optimize.ControlFlow
 
 --How long do we let our call strings be?
-contextDepth = 2
+contextDepth = 0
 
 insertAll :: Ord k => [(k,a)] -> Map.Map k a -> Map.Map k a
 insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs  
@@ -81,10 +81,10 @@ getRelevantDefs  eAnn =
       let progInfo =  makeProgramInfo edges
       let targetNodes = map (\n -> ProcExit n ) fnLabels
       trace ( "All edges " ++ (show (labelPairs progInfo ) ) ) $
-        return (progInfo, allNodes, expDict, targetNodes)
+        return (progInfo, allNodes, expDict, targetNodes, fnInfo)
   in case maybeInfo of
     Nothing -> Nothing
-    Just (pinfo, allNodes, expDict, targetNodes) ->
+    Just (pinfo, allNodes, expDict, targetNodes, fnInfo) ->
       let
         reachMap = callGraph eAnn
         domain = map (\d -> map Call d) $ contextDomain contextDepth reachMap
@@ -98,7 +98,7 @@ getRelevantDefs  eAnn =
         --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = Map.mapWithKey
                        (\x (ReachingDefs s) ->
-                         Set.filter (isExprRef expDict x) s) theDefs
+                         Set.filter (isExprRef fnInfo expDict x) s) theDefs
       in trace ("Return of RD " ++ show relevantDefs ) $ Just (pinfo, relevantDefs, targetNodes)
 
 instance Show (ProgramInfo LabelNode) where
@@ -109,18 +109,25 @@ instance Show (ProgramInfo LabelNode) where
     show pinfo_allLabels ++ show pinfo_labelPairs
 
 isExprRef
-  :: Map.Map Label LabeledExpr
+  :: Map.Map Var FunctionInfo
+  -> Map.Map Label LabeledExpr
   -> LabelNode
   -> (VarPlus, Maybe Label )
   -> Bool
-isExprRef exprs lnode (vplus, _) = let
+isExprRef fnInfo exprs lnode (vplus, _) = let
     e = case (exprs `mapGet` (getNodeLabel lnode)) of
       (A _ (Let defs body)) -> body --We only look for refs in the body of a let
       ex -> ex
   in case vplus of
-      NormalVar v -> expContainsVar e v 
+      NormalVar v defLabel -> expContainsVar e v 
       IntermedExpr l -> expContainsLabel e l
-      FormalReturn v -> expContainsVar e v --check if we reference the function called --TODO more advanced?
+      FormalReturn v ->
+        --check if we reference the function called --TODO more advanced?
+        (expContainsVar e v) || case (lnode, topFnLabel `fmap` Map.lookup v fnInfo) of
+          (ProcExit l1, Just ( Just l2)) -> l1 == l2
+          (Return v2 _, _ ) -> v == v2
+          _ -> False
+        
       ActualParam l -> expContainsLabel e l
       FormalParam pat _ -> or $ map (expContainsVar e) $ getPatternVars pat
 
@@ -132,8 +139,8 @@ makeProgramInfo edgeList = let
     labelEdges = List.nub $ map (\(node1, node2) -> (fmap getLab node1, fmap getLab node2)) edgeList
     allLabels = List.nub $ concat $ [[n,n'] | (n,n') <- labelEdges]
     initialEdgeMap = Map.fromList $ zip allLabels $ repeat []
-    edgeMap = foldr (\(l1, l2) env -> Map.insert l1 ([l2] ++ (trace "mapget 2" $ env `mapGet` l1)  ) env) initialEdgeMap labelEdges
-    edgeFn = (\node -> trace "mapget 3" $ edgeMap `mapGet` node)
+    edgeMap = foldr (\(l1, l2) env -> Map.insert l1 ([l2] ++ (env `mapGet` l1)  ) env) initialEdgeMap labelEdges
+    edgeFn = (\node ->  edgeMap `mapGet` node)
     isExtremal (GlobalEntry) = True
     isExtremal _ = False --TODO entry or exit? Forward or backward?
   in trace ("!!!!!!!!!All labels " ++ show (allLabels) ) $ ProgramInfo edgeFn allLabels labelEdges isExtremal
