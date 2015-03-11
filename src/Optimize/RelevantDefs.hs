@@ -107,7 +107,9 @@ isExprRef
   -> (VarPlus, Maybe Label )
   -> Bool
 isExprRef exprs lnode (vplus, _) = let
-    e = trace "mapget 1" $ exprs `mapGet` (getNodeLabel lnode)
+    e = case (exprs `mapGet` (getNodeLabel lnode)) of
+      (A _ (Let defs body)) -> body --We only look for refs in the body of a let
+      ex -> ex
   in case vplus of
       NormalVar v -> expContainsVar e v 
       IntermedExpr l -> expContainsLabel e l

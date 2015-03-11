@@ -19,9 +19,9 @@ import qualified Data.Set as Set
 import qualified Data.Map as Map
 --import qualified Data.Array as Array
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 --TODO remove
-trace _ x = x
+--trace _ x = x
 
 --Wrapper for a control flow graph
 --newtype CFG block = CFG (Set.Set (block, block))
@@ -74,8 +74,8 @@ minFP lat@(Lattice{..}) f info = trace ("In MinFP" ++ show (length $ labelPairs 
     --stResult :: ST s [(label, payload)]
     initialSolns = foldr (\l solnsSoFar ->
                              if isExtremal info l
-                             then trace ("Inserting Bottom" ) $Map.insert l latticeBottom solnsSoFar
-                             else trace ("Inserting Iota" ) $ Map.insert l iota solnsSoFar
+                             then trace ("Inserting iota " ++ show l ) $Map.insert l iota solnsSoFar
+                             else trace ("Inserting Bottom" ++ show l ) $ Map.insert l latticeBottom solnsSoFar
                            ) Map.empty (allLabels info)
     mfpOpen = trace ("Initial solutions " ++ show (length $ labelPairs info)  ) $ iterateSolns initialSolns (labelPairs info)
     iterateSolns currentSolns [] = trace "!!!!!!!Done FP Iter\n\n" $ currentSolns

@@ -101,7 +101,7 @@ sdgProgInfo names eAnn = do
     let controlEdges = [] --TODO need control flow edges?s
     let dataEdges =
           concat $ Map.elems $ Map.mapWithKey
-            (\n rdSet -> [(toSDG n,  SDGDef var def) | (var, Just def) <- (Set.toList rdSet)] ) relevantDefs
+            (\n rdSet -> [(SDGDef var def, toSDG n) | (var, Just def) <- (Set.toList rdSet)] ) relevantDefs
     let originalLabels = map toSDG $ Map.keys relevantDefs
     --If n1 depends on def at label lab, then we have lab -> n1 as dependency
     --TODO is this right?
@@ -113,7 +113,9 @@ sdgProgInfo names eAnn = do
             edgeMap = \lnode -> [l2 | (l1, l2) <- allEdges, l1 == lnode], --TODO make faster
             allLabels = List.nub $ originalLabels ++ ( concat $ [[l1, l2] | (l1, l2) <- allEdges ]),
             labelPairs = allEdges,
-            isExtremal = \lnode -> lnode `Set.member` sdgTargets
+            isExtremal = \lnode -> let
+                isTarget = lnode `Set.member` sdgTargets
+              in trace ("Is Extremal? " ++ show lnode ++ " targets " ++ show sdgTargets ++ "ismember " ++ show isTarget ) $ isTarget
           }
     
     return (pinfo, Set.toList sdgTargets)
@@ -129,10 +131,10 @@ removeDeadCode targetVars e = case dependencyMap of
     -- $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where
     eAnn = annotateCanonical (Map.empty)  (Label []) e
-    toDefSet depMap targetNodes = trace "Makign def set " $ let
-        defsReachingTargets =
-          trace ( "DefsReachingTargets " ++ (show depMap ) ) $ Set.unions [setFromEmb (depMap `mapGet` tnode) | tnode <- targetNodes]
-      in defsReachingTargets
+    --toDefSet depMap targetNodes = trace "Makign def set " $ let
+    --    defsReachingTargets =
+    --      trace ( "DefsReachingTargets " ++ (show depMap ) ) $ Set.unions [setFromEmb (depMap `mapGet` tnode) | tnode <- targetNodes]
+    --  in defsReachingTargets
     dependencyMap = do
       (pinfo, targetNodes) <- trace "Got SDG info" $  sdgProgInfo targetVars eAnn
       let (_,defMap) =
@@ -148,10 +150,17 @@ removeDeadCode targetVars e = case dependencyMap of
     removeDefsInBody targetNodes depMap = trace ("Removing with dep depMap " ++ show depMap ) $
       tformEverywhere (\(A ann@(_,lab,_) eToTrans) ->
         case eToTrans of
-          Let defs body -> A ann $ Let (filter (defIsRelevant targetNodes depMap lab) defs) body
+          Let defs body -> A ann $ Let (filter (defIsRelevant targetNodes depMap ) defs) body
           _ -> A ann eToTrans )
     --TODO treat each def as separate
-    defIsRelevant targetNodes reachedNodesMap _ (GenericDef pat expr _ty) = let
+
+
+
+--Given a list of target nodes,
+-- a mapping of nodes to nodes they are relevant to (result of our FP iteration)
+-- and a Definition, return true if we should keep the definition
+defIsRelevant :: [SDGNode] -> Map.Map SDGNode SDG -> LabelDef -> Bool
+defIsRelevant targetNodes reachedNodesMap def@(GenericDef pat expr _ty) = let
         definedVars = getPatternVars pat
         definedVarPlusses = map (\v -> NormalVar $  v) definedVars
         nodesForDefs = map (\var -> SDGDef var (getLabel expr)) definedVarPlusses
@@ -159,7 +168,8 @@ removeDeadCode targetVars e = case dependencyMap of
           map (\varNode -> case (reachedNodesMap `mapGet` varNode) of
                   x -> unSDG x) nodesForDefs
                   -- EmbPayload _ lhat -> unSDG $ lhat []) nodesForDefs
-      in not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
+        isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
+      in isRel
 
    
 
