@@ -69,7 +69,7 @@ compile user packageName source interfaces =
         Right modul -> do
             (modName, _) <- parseDependencies source
             let iface = Module.toInterface modul
-            let (optimizedModul, optIface) = optimizeModule modName (modul, iface)
+            let (optimizedModul, optIface) = optimizeModule interfaces modName (modul, iface)
             Right (optIface, JS.generate optimizedModul)
 
         Left docs ->

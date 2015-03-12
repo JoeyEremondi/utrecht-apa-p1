@@ -20,7 +20,8 @@ type WholeProgOptFun =
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface) 
 
-type ModuleOptFun = PublicModule.Name
+type ModuleOptFun = Map.Map PublicModule.Name PublicModule.Interface
+                    -> PublicModule.Name
                     -> (PublicModule.Module, PublicModule.Interface)
                     -> (PublicModule.Module, PublicModule.Interface)
 

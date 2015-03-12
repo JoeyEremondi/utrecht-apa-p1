@@ -19,14 +19,16 @@ import           Optimize.Environment
 import           Optimize.MonotoneFramework
 import           Optimize.Types
 
+import qualified AST.Variable as Var
+
 import Optimize.EmbellishedMonotone
 import Optimize.ControlFlow hiding (trace)
 import Optimize.RelevantDefs
 
 --import Optimize.Reachability (reachabilityMap)
 
---import Debug.Trace (trace)
-trace _ x = x
+import Debug.Trace (trace)
+--trace _ x = x
 --How deep we go in our call strings for context
 contextDepth = 2
 
@@ -94,11 +96,12 @@ makeFunctionEdge :: (LabelNode, LabelNode) -> (SDGNode, SDGNode)
 makeFunctionEdge (n1, n2) = (SDGFunction n1, SDGFunction n2) 
 
 sdgProgInfo
-  :: [Name]
+  :: Map.Map Var FunctionInfo
+  -> [Name]
   -> LabeledExpr
   -> Maybe (ProgramInfo SDGNode, [SDGNode])
-sdgProgInfo names eAnn = do
-    (reachDefInfo, relevantDefs, targetNodes) <- getRelevantDefs eAnn
+sdgProgInfo initFnInfo names eAnn = do
+    (reachDefInfo, relevantDefs, targetNodes) <- getRelevantDefs initFnInfo  eAnn
     --targetNodes <- getTargetNodes names eAnn
     let callEdges =
           map makeFunctionEdge $ filter isFunctionEdge (labelPairs reachDefInfo)
@@ -130,18 +133,19 @@ setFromEmb (EmbPayload (_, lhat)) = unSDG $ lhat []
 
 
 removeDeadCode
-  :: [Name]
+  :: Map.Map Var FunctionInfo
+    -> [Name]
     -> Canon.Expr
     -> Canon.Expr
-removeDeadCode  targetVars e = case dependencyMap of
-  Nothing -> error "Failed getting data Dependencies"
-  Just (depMap, targetNodes) -> toCanonical
+removeDeadCode initFnInfo targetVars e = case dependencyMap of
+  Nothing -> trace "!!! Couldn't Optimize" e
+  Just (depMap, targetNodes) -> trace "Opt Success" $ toCanonical
        $ removeDefs targetNodes depMap eAnn 
     -- $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where
     eAnn = annotateCanonical (Map.empty)  (Label 1) e
     dependencyMap = do
-      (pinfo, targetNodes) <- sdgProgInfo targetVars eAnn
+      (pinfo, targetNodes) <- sdgProgInfo initFnInfo targetVars eAnn
       let reachMap = callGraph eAnn
       let domain = map (\d -> map (\l -> SDGFunction (Call l)) d ) $ contextDomain contextDepth reachMap
       let (_,embDefMap) =
@@ -154,7 +158,7 @@ removeDeadCode  targetVars e = case dependencyMap of
 
 --Given a set of target nodes, a map from nodes to other nodes depending on that node,
 --And a module's expression, traverse the tree and remove unnecessary Let definitions
-removeDefs targetNodes depMap eAnn =
+removeDefs targetNodes depMap eAnn = 
       tformModEverywhere (\(A ann@(_,defLab,_env) eToTrans) ->
         case eToTrans of
           Let defs body -> A ann $
@@ -186,11 +190,11 @@ defIsRelevant defLabel targetNodes reachedNodesMap def@(GenericDef pat expr _ty)
 --TODO label definitions, not Let statements
 
 removeModuleDeadCode :: ModuleOptFun
-removeModuleDeadCode modName (modul, iface) = let
-    
-    isValue value = case value of--TODO remove
+removeModuleDeadCode otherIfaces modName  (modul, iface) = trace (show modName) $ let  
+    fnInfo = interfaceFnInfo otherIfaces
+    isValue value = case value of --TODO remove
       Variable.Value s -> True
       _ -> False
     valToName (Variable.Value s) = Name [s]
     names = map valToName $ filter isValue $ Module.iExports iface
-  in (tformModule (removeDeadCode names) modul, iface)
+  in (tformModule (removeDeadCode fnInfo names) modul, iface)

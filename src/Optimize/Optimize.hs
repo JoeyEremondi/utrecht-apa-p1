@@ -23,7 +23,7 @@ optimizeProgram targets initialModules = foldr (\f modDict ->
                                             f targets modDict) initialModules wholeProgOpts
 
 optimizeModule :: ModuleOptFun
-optimizeModule name initialMod =  foldr (\f modDict -> f name modDict) initialMod  moduleOpts
+optimizeModule ifaces name initialMod =  foldr (\f modDict -> f ifaces name modDict) initialMod  moduleOpts
 
 
 wholeProgOpts :: [WholeProgOptFun]

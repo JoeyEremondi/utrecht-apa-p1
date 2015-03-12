@@ -23,11 +23,11 @@ import           Optimize.Types
 
 import Optimize.ControlFlow hiding (trace)
 
---import Debug.Trace (trace)
-trace _ x = x
+import Debug.Trace (trace)
+--trace _ x = x
 
 --How long do we let our call strings be?
-contextDepth = 0
+contextDepth = 2
 
 insertAll :: Ord k => [(k,a)] -> Map.Map k a -> Map.Map k a
 insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs  
@@ -51,11 +51,12 @@ getFreeVars nodes = let
 
 --Give the list of definitions  
 getRelevantDefs
-  :: LabeledExpr
+  :: Map.Map Var FunctionInfo
+  -> LabeledExpr
   -> Maybe (ProgramInfo LabelNode,
            Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)),
            [LabelNode])
-getRelevantDefs  eAnn =
+getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
   let
     --TODO add info for external calls!
     maybeInfo = do
@@ -72,9 +73,9 @@ getRelevantDefs  eAnn =
                (ProcEntry fnDef)
                (ProcExit fnDef)
                (Just $ getLabel fnDef)
-              ) finfo) Map.empty defs
-      (headDicts, tailDicts, edgeListList ) <- unzip3 `fmap` forM defs (allDefEdges fnInfo)
-      let headDict = Map.unions headDicts
+              ) finfo) initFnInfo defs
+      (headDicts, tailDicts, edgeListList ) <- trace "Getting all edges" $ unzip3 `fmap` forM defs (allDefEdges fnInfo)
+      let headDict = trace "Getting head dict" $ Map.unions headDicts
       let tailDict = Map.unions tailDicts
       functionEdgeListList <- forM defs (functionDefEdges (headDict, tailDict))
       let initialNodes = [ProcEntry (getLabel body)| (GenericDef (Pattern.Var n) body _ ) <- defs ]
@@ -87,7 +88,7 @@ getRelevantDefs  eAnn =
       trace ( "All edges " ++ (show (labelPairs progInfo ) ) ) $
         return (progInfo, allNodes, expDict, targetNodes, fnInfo)
   in case maybeInfo of
-    Nothing -> Nothing
+    Nothing -> trace "Failed getting info" $ Nothing
     Just (pinfo, allNodes, expDict, targetNodes, fnInfo) ->
       let
         reachMap = callGraph eAnn
@@ -123,7 +124,9 @@ isExprRef fnInfo exprs lnode (vplus, Just _) = let
       (A _ (Let defs body)) -> body --We only look for refs in the body of a let
       ex -> ex
   in case vplus of
-      NormalVar v defLabel -> expContainsVar e v 
+      ExternalParam _ v -> expContainsVar e v
+      Ref v -> expContainsVar e v
+      NormalVar v _defLabel -> expContainsVar e v 
       IntermedExpr l ->  expContainsLabel e l
       FormalReturn v ->
         --check if we reference the function called --TODO more advanced?
@@ -180,6 +183,7 @@ removeKills _ aIn = aIn
 gens :: LabelNode -> Set.Set RDef
 gens (Assign var label) = Set.singleton (var, Just label)
 gens (AssignParam var _ label) = Set.singleton (var, Just label)
+gens (ExternalCall v _) = Set.singleton (FormalReturn v, Nothing) --TODO what label?
 gens _ = Set.empty
 
 
