@@ -20,13 +20,13 @@ import           Optimize.MonotoneFramework
 import           Optimize.Types
 
 import Optimize.EmbellishedMonotone
-import Optimize.ControlFlow
+import Optimize.ControlFlow hiding (trace)
 import Optimize.RelevantDefs
 
 --import Optimize.Reachability (reachabilityMap)
 
-import Debug.Trace (trace)
-
+--import Debug.Trace (trace)
+trace _ x = x
 --How deep we go in our call strings for context
 contextDepth = 2
 

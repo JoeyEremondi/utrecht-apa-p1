@@ -20,9 +20,11 @@ import           Optimize.MonotoneFramework
 import           Optimize.EmbellishedMonotone
 import           Optimize.Types
 
-import Debug.Trace (trace)
 
-import Optimize.ControlFlow
+import Optimize.ControlFlow hiding (trace)
+
+--import Debug.Trace (trace)
+trace _ x = x
 
 --How long do we let our call strings be?
 contextDepth = 0
@@ -71,19 +73,16 @@ getRelevantDefs  eAnn =
                (ProcExit fnDef)
                (Just $ getLabel fnDef)
               ) finfo) Map.empty defs
-      let fnBodies = map (\(GenericDef _ fnDef _ ) -> functionBody fnDef) defs
-      (headDicts, tailDicts, edgeListList ) <- unzip3 `fmap` forM fnBodies (allExprEdges fnInfo)
+      (headDicts, tailDicts, edgeListList ) <- unzip3 `fmap` forM defs (allDefEdges fnInfo)
       let headDict = Map.unions headDicts
       let tailDict = Map.unions tailDicts
-      let targetNodes = map (\n -> ProcExit n ) fnLabels
       functionEdgeListList <- forM defs (functionDefEdges (headDict, tailDict))
-      let entryEdges = [[(GlobalEntry, ProcEntry body)|
-                         (GenericDef (Pattern.Var n) body _ ) <- defs ]]
-      let controlEdges = concat $ edgeListList ++ functionEdgeListList ++ entryEdges
+      let initialNodes = [ProcEntry (getLabel body)| (GenericDef (Pattern.Var n) body _ ) <- defs ]
+      let controlEdges = concat $ edgeListList ++ functionEdgeListList 
       let edges = map (\(n1,n2) -> (getLabel `fmap` n1, getLabel `fmap` n2 ) ) controlEdges
       --edges = concat `fmap` edgeListList
       let allNodes = Set.toList $ Set.fromList $ concat [[x,y] | (x,y) <- edges] --TODO nub?
-      let progInfo =  makeProgramInfo allNodes edges
+      let progInfo =  makeProgramInfo (Set.fromList initialNodes) allNodes edges
       let targetNodes = map (\n -> ProcExit n ) fnLabels
       trace ( "All edges " ++ (show (labelPairs progInfo ) ) ) $
         return (progInfo, allNodes, expDict, targetNodes, fnInfo)
@@ -137,16 +136,15 @@ isExprRef fnInfo exprs lnode (vplus, Just _) = let
       FormalParam pat _ -> or $ map (expContainsVar e) $ getPatternVars pat
 isExprRef _ _ _ _ = False --If not in "Just" form, we ignore, since is uninitialized variable
 
-makeProgramInfo :: [LabelNode] -> [(LabelNode, LabelNode)] -> ProgramInfo LabelNode
-makeProgramInfo allLabels edgeList = let
+makeProgramInfo :: Set.Set LabelNode -> [LabelNode] -> [(LabelNode, LabelNode)] -> ProgramInfo LabelNode
+makeProgramInfo initialNodes allLabels edgeList = let
     --first fmap is over labels, second is over pair
     --labelEdges = List.nub $ map (\(node1, node2) -> (fmap getLab node1, fmap getLab node2)) edgeList
     --allLabels = List.nub $ concat $ [[n,n'] | (n,n') <- edgeList]
     initialEdgeMap = Map.fromList $ zip allLabels $ repeat []
     edgeMap = foldr (\(l1, l2) env -> Map.insert l1 ([l2] ++ (env `mapGet` l1)  ) env) initialEdgeMap edgeList
     edgeFn = (\node ->  edgeMap `mapGet` node)
-    isExtremal (GlobalEntry) = True
-    isExtremal _ = False --TODO entry or exit? Forward or backward?
+    isExtremal = (`Set.member` initialNodes)
   in ProgramInfo edgeFn allLabels edgeList isExtremal
 
 type RDef = (VarPlus, Maybe Label) 
