@@ -32,7 +32,7 @@ insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs
 
 
 
-getFreeVars :: [ControlNode] ->  [VarPlus]
+getFreeVars :: [LabelNode] ->  [VarPlus]
 getFreeVars nodes = let
     freeVars = Set.toList $ foldr (
       \ lnode varsSoFar -> let
@@ -79,10 +79,11 @@ getRelevantDefs  eAnn =
       functionEdgeListList <- forM defs (functionDefEdges (headDict, tailDict))
       let entryEdges = [[(GlobalEntry, ProcEntry body)|
                          (GenericDef (Pattern.Var n) body _ ) <- defs ]]
-      let edges = concat $ edgeListList ++ functionEdgeListList ++ entryEdges
+      let controlEdges = concat $ edgeListList ++ functionEdgeListList ++ entryEdges
+      let edges = map (\(n1,n2) -> (getLabel `fmap` n1, getLabel `fmap` n2 ) ) controlEdges
       --edges = concat `fmap` edgeListList
-      let allNodes = concat [[x,y] | (x,y) <- edges] --TODO nub?
-      let progInfo =  makeProgramInfo edges
+      let allNodes = Set.toList $ Set.fromList $ concat [[x,y] | (x,y) <- edges] --TODO nub?
+      let progInfo =  makeProgramInfo allNodes edges
       let targetNodes = map (\n -> ProcExit n ) fnLabels
       trace ( "All edges " ++ (show (labelPairs progInfo ) ) ) $
         return (progInfo, allNodes, expDict, targetNodes, fnInfo)
@@ -136,19 +137,17 @@ isExprRef fnInfo exprs lnode (vplus, Just _) = let
       FormalParam pat _ -> or $ map (expContainsVar e) $ getPatternVars pat
 isExprRef _ _ _ _ = False --If not in "Just" form, we ignore, since is uninitialized variable
 
-makeProgramInfo :: [ControlEdge] -> ProgramInfo LabelNode
-makeProgramInfo edgeList = let
+makeProgramInfo :: [LabelNode] -> [(LabelNode, LabelNode)] -> ProgramInfo LabelNode
+makeProgramInfo allLabels edgeList = let
     --first fmap is over labels, second is over pair
-    getLab = (\(A (_,l,_) _) -> l)
-    labelEdges :: [(LabelNode, LabelNode)]
-    labelEdges = List.nub $ map (\(node1, node2) -> (fmap getLab node1, fmap getLab node2)) edgeList
-    allLabels = List.nub $ concat $ [[n,n'] | (n,n') <- labelEdges]
+    --labelEdges = List.nub $ map (\(node1, node2) -> (fmap getLab node1, fmap getLab node2)) edgeList
+    --allLabels = List.nub $ concat $ [[n,n'] | (n,n') <- edgeList]
     initialEdgeMap = Map.fromList $ zip allLabels $ repeat []
-    edgeMap = foldr (\(l1, l2) env -> Map.insert l1 ([l2] ++ (env `mapGet` l1)  ) env) initialEdgeMap labelEdges
+    edgeMap = foldr (\(l1, l2) env -> Map.insert l1 ([l2] ++ (env `mapGet` l1)  ) env) initialEdgeMap edgeList
     edgeFn = (\node ->  edgeMap `mapGet` node)
     isExtremal (GlobalEntry) = True
     isExtremal _ = False --TODO entry or exit? Forward or backward?
-  in ProgramInfo edgeFn allLabels labelEdges isExtremal
+  in ProgramInfo edgeFn allLabels edgeList isExtremal
 
 type RDef = (VarPlus, Maybe Label) 
 

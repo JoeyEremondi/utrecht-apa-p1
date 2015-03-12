@@ -13,6 +13,7 @@ import qualified Data.Set                   as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
 import AST.Variable (home, Home(..))
+import qualified AST.Variable as Var
 
 import qualified AST.Variable as Variable
 
@@ -21,6 +22,8 @@ import           Optimize.MonotoneFramework
 import           Optimize.Types
 
 import Debug.Trace (trace)
+
+import qualified AST.Type as Type
 
 --Type for variables or some "special cases"
 data VarPlus =
@@ -134,7 +137,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
   let subEdges = concat subEdgesL
   case expr of
     --Function: we have call and return for the call, and evaluating each arg is a mock assignment
-    App e1 e2 -> do
+    App e1 _ -> do
       fnName <- functionName e1
       argList <- argsGiven e
       let numArgs = length argList
@@ -302,6 +305,33 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
         --For control flow, we just calculate each sub-expression in sequence
         --We connect the end nodes of each sub-expression to the first of the next
 
+
+allExprEdges
+  :: Map.Map Var FunctionInfo
+  -> (LabeledExpr, Type.CanonicalType)
+  -> Maybe (
+    Map.Map Label [ControlNode],
+    Map.Map Label [ControlNode],
+    [(ControlNode, ControlNode)] )
+allExprEdges fnInfo (body, ty) =
+  if (isStateMonadFn ty)
+  then monadicDefEdges fnInfo body
+  else allExprEdgesNonMonadic fnInfo body
+
+allExprEdgesNonMonadic
+  :: Map.Map Var FunctionInfo
+  -> LabeledExpr
+  -> Maybe (
+    Map.Map Label [ControlNode],
+    Map.Map Label [ControlNode],
+    [(ControlNode, ControlNode)] )
+allExprEdgesNonMonadic fnInfo e = foldE
+           (\ _ () -> repeat ())
+           ()
+           (\(GenericDef _ e v) -> [e])
+           (\ _ e subs-> oneLevelEdges fnInfo e subs)
+           e
+
 nameToCanonVar :: String -> Var
 nameToCanonVar name = Variable.Canonical  Variable.Local name
 
@@ -331,6 +361,45 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   let gotoBodyEdges = connectLists ([last assignParams], headMap `mapGet` (getLabel body))
   
   return $ startEdges ++ assignFormalEdges ++ assignReturnEdges ++ fnExitEdges ++ gotoBodyEdges
+
+--Given a monadic expression, break it up into statements
+--And calculate the edges between those statements in our CFG
+--TODO self recursion
+--TODO nested state monads?
+monadicDefEdges
+  :: Map.Map Var FunctionInfo
+  -> LabeledExpr
+  -> Maybe (
+    Map.Map Label [ControlNode],
+    Map.Map Label [ControlNode],
+    [(ControlNode, ControlNode)] )
+monadicDefEdges fnInfo e@(A _ expr) = do
+  let (firstStmt, patternStmts) = sequenceMonadic e
+  let otherStmts = (map snd patternStmts) :: [LabeledExpr]
+  statementInfoTail <- forM otherStmts (allExprEdgesNonMonadic fnInfo)
+  statementInfoHead <- allExprEdgesNonMonadic fnInfo firstStmt
+  let patLabels = (map fst patternStmts)
+  let statementInfo = (statementInfoHead:statementInfoTail)
+  let zippedInfo = zip (firstStmt:(map snd patternStmts)) statementInfo
+  let linkStatementEdges ((pat,andThenExpr), info1, info2) = do
+        let (s1, (headMap1, tailMap1, _)) = info1
+        let (s2, (headMap2, tailMap2, _)) = info2
+        let s1Tail = tailMap1 `mapGet` (getLabel s1)
+        let s2Head = headMap2 `mapGet` (getLabel s2)
+        let assignParamNode = AssignParam (FormalParam pat (getLabel s2)) (IntermedExpr (getLabel s1)) andThenExpr
+        return $  (connectLists (s1Tail, [assignParamNode] )) ++ (connectLists ([assignParamNode], s2Head))
+  let edgeTriples =  (zip3 patLabels (tail zippedInfo) (init zippedInfo))
+  let betweenStatementEdges = concatMap linkStatementEdges edgeTriples
+  let combinedHeads = Map.unions $ map (\(hmap,_,_) -> hmap) statementInfo
+  let combinedTails = Map.unions $ map (\(_, tmap, _) -> tmap) statementInfo
+  let newHeads =
+        Map.insert (getLabel e) (combinedHeads `mapGet` (getLabel firstStmt)) combinedHeads
+  let newTails =
+        Map.insert (getLabel e) (combinedTails `mapGet` (getLabel $ last otherStmts ) ) combinedTails
+  return $ (newHeads,
+           newTails,
+           concat betweenStatementEdges
+             ++ concatMap (\(_,_,edges) -> edges) statementInfo)
   
     
 varAssign :: Label -> Pattern -> LabeledExpr -> [ControlNode]
@@ -359,6 +428,33 @@ functionArgLabels :: LabeledExpr -> [Label]
 functionArgLabels (A (_,l,_) (Lambda pat e)) = [l] ++ (functionArgLabels e)
 functionArgLabels _ = []
 
+--Get the "final" return type of a function type
+--i.e. what's returned if it is fully applied
+functionFinalReturnType :: Type.CanonicalType -> Type.CanonicalType
+functionFinalReturnType (Type.Lambda _ ret) = functionFinalReturnType ret
+functionFinalReturnType t = t
+
+--Our special State monad for imperative code                           
+stateMonadTycon = Type.Var ("EState")
+
+--Check if a function is "monadic" for our state monad
+isStateMonadFn :: Type.CanonicalType -> Bool
+isStateMonadFn ty =  case (functionFinalReturnType ty) of
+  (Type.App tyCon _) -> tyCon == stateMonadTycon
+  _ -> False
+
+--Given a monadic function, sequence it into a series of "statements"
+--Based on the `andThen` bind operator, used in infix position
+sequenceMonadic :: LabeledExpr -> (LabeledExpr, [( (Pattern, LabeledExpr), LabeledExpr)])
+sequenceMonadic e@(A _ (Binop op e1 (A _ (Lambda pat body)) )) = case (Var.name op) of
+  "andThen" -> let
+      (bodyHead,bodySeq) = sequenceMonadic body
+    in (e1, ( (pat, e ), bodyHead):bodySeq)
+  _ -> (e,[])
+sequenceMonadic e = (e,[])
+
+--TODO make TailRecursive
+
 getArity :: LabeledExpr -> Int
 getArity (A _ (Lambda _ e)) = 1 + (getArity e)
 getArity e = 0
@@ -371,19 +467,7 @@ argsGiven (A _ e) = case e of
 
 
 
-allExprEdges
-  :: Map.Map Var FunctionInfo
-  -> LabeledExpr
-  -> Maybe (
-    Map.Map Label [ControlNode],
-    Map.Map Label [ControlNode],
-    [(ControlNode, ControlNode)] )
-allExprEdges fnInfo e = foldE
-           (\ _ () -> repeat ())
-           ()
-           (\(GenericDef _ e v) -> [e])
-           (\ _ e subs-> oneLevelEdges fnInfo e subs)
-           e
+
 
 isArith :: Var -> Bool
 isArith = (`elem` arithVars )

@@ -41,8 +41,7 @@ fnEquality
 fnEquality lh1@(EmbPayload (domain, lhat)) lh2@(EmbPayload (_, lhat')) =
   let
     areEq = (map ( lhat $ ) domain) == (map (lhat' $ ) domain)
-  in trace ("Equal? " ++ show areEq ++ "\nComparing 1:\n" ++ show lh1 ++ "\nand 2\n" ++ show lh2 ) $
-   areEq
+  in areEq
 
 liftToEmbellished
   :: (Eq payload, Show payload, Show d)
