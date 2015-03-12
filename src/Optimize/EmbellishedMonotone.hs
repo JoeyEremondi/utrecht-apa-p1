@@ -10,14 +10,16 @@ import qualified AST.Pattern                as Pattern
 import Optimize.Traversals
 import qualified Data.List as List
 
+import Debug.Trace (trace)
+
 
 import qualified Data.Map as Map
 
-data EmbPayload a b = EmbPayload [[a]] ([a] -> b)
+newtype EmbPayload a b = EmbPayload ([[a]], ([a] -> b))
 
 instance (Show b, Show a) => Show (EmbPayload a b)
   where
-    show (EmbPayload domain lhat) =
+    show (EmbPayload (domain, lhat)) =
       (List.intercalate " ;; " $
         map (\ d -> (show d) ++ " -> " ++ (show $ lhat d)) domain) ++ "\n"
       
@@ -33,25 +35,29 @@ liftJoin lat = \(EmbPayload domain1 x) (EmbPayload domain2 y) ->
 -}
 
 fnEquality
-  :: (Eq payload)
+  :: (Eq payload, Show payload, Show d)
   => EmbPayload d payload
   -> EmbPayload d payload -> Bool
-fnEquality (EmbPayload domain lhat) (EmbPayload _ lhat') = (map ( lhat $ ) domain) == (map (lhat' $ ) domain)
+fnEquality lh1@(EmbPayload (domain, lhat)) lh2@(EmbPayload (_, lhat')) =
+  let
+    areEq = (map ( lhat $ ) domain) == (map (lhat' $ ) domain)
+  in trace ("Equal? " ++ show areEq ++ "\nComparing 1:\n" ++ show lh1 ++ "\nand 2\n" ++ show lh2 ) $
+   areEq
 
 liftToEmbellished
-  :: (Eq payload)
+  :: (Eq payload, Show payload, Show d)
   => [[d]]
   -> payload
   -> Lattice payload
   -> Lattice (EmbPayload d payload)
 liftToEmbellished domain iotaVal lat =
   let
-    embJoin = \ (EmbPayload _ x) (EmbPayload _ y)
-                  -> EmbPayload domain $ \d -> (latticeJoin lat) (x d) (y d)
+    embJoin = \ (EmbPayload (_, x)) (EmbPayload (_, y))
+                  -> EmbPayload (domain,  \d -> (latticeJoin lat) (x d) (y d))
   in Lattice {
-    latticeBottom = EmbPayload [] $ \_ -> latticeBottom lat,
+    latticeBottom = EmbPayload (domain,  \_ -> latticeBottom lat),
     latticeJoin = embJoin,
-    iota = EmbPayload domain $ \d -> if (null d) then iotaVal else latticeBottom lat,
+    iota = EmbPayload (domain , \d -> if (null d) then iotaVal else latticeBottom lat),
     lleq = \x y -> fnEquality (embJoin x y) y,
     flowDirection = flowDirection lat
   }
@@ -69,22 +75,23 @@ liftToFn
   -> (EmbPayload LabelNode payload)
   -> (EmbPayload LabelNode payload)
 
-liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload domain lhat) =
-  EmbPayload domain $ \d -> case d of
+liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload (domain, lhat)) =
+  EmbPayload (domain, \d -> case d of
     [] -> latticeBottom
     ( lc:dRest) -> let
           possibleEnds = [ldom | ldom <- domain, (take depth (lc:ldom)) == (lc:dRest) ]
         in if (Call label == lc)
            then joinAll lat [lhat dPoss | dPoss <- possibleEnds]
-           else joinAll lat [lhat dPoss | dPoss <- possibleEnds] --error "Invalid call string"
-liftToFn _ _ _f fret resultMap rnode@(Return _ label) (EmbPayload domain lhat') =
+           else joinAll lat [lhat dPoss | dPoss <- possibleEnds]) --error "Invalid call string"
+liftToFn _ _ _f fret resultMap rnode@(Return _ label) (EmbPayload (domain, lhat')) =
   let
-    (EmbPayload _ lhat) = (resultMap Map.! (Call label) )
-  in EmbPayload domain $ \d -> --We assume they have the same domain 
-    fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) )
-liftToFn _ _ f _ resultMap lnode (EmbPayload domain lhat) = let
+    (EmbPayload (_, lhat)) = (resultMap Map.! (Call label) )
+  in EmbPayload (domain,
+                 \d -> --We assume they have the same domain 
+                   fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) ) )
+liftToFn _ _ f _ resultMap lnode (EmbPayload (domain, lhat)) = let
     simpleMap = (error "Shouldn't use resultMap in non lifted this case" )
-  in EmbPayload domain $ \d -> (f simpleMap lnode) (lhat d)
+  in EmbPayload (domain ,\d -> (f simpleMap lnode) (lhat d))
 
 --TODO need reverse graph?
 callGraph :: LabeledExpr -> Map.Map Label [Label]

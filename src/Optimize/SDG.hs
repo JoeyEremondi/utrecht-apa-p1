@@ -68,19 +68,19 @@ transferFun
   -> SDGNode
   -> EmbPayload SDGNode SDG
   -> EmbPayload SDGNode SDG
-transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload domain pl) = case lnode of
-  SDGFunction (Call l) -> EmbPayload domain (\d -> case d of
+transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = case lnode of
+  SDGFunction (Call l) -> EmbPayload (domain, (\d -> case d of
     [] -> latticeBottom
     lc:d' -> let
         possibleEnds = [ldom | ldom <- domain, (take contextDepth (lc:ldom)) == (lc:d') ]
-      in joinAll lat [pl dPoss | dPoss <- possibleEnds])
+      in joinAll lat [pl dPoss | dPoss <- possibleEnds]) )
   SDGFunction (Return fn l) -> let 
-      (EmbPayload domain2 lcall) = resultDict `mapGet` (SDGFunction $ Call l)
-    in EmbPayload (domain ++ domain2) $ \d ->
-     (lcall d) `latticeJoin` (pl ((SDGFunction $ Call l):d ) )
-  _ -> lhat
+      (EmbPayload (domain2, lcall)) = resultDict `mapGet` (SDGFunction $ Call l)
+    in EmbPayload (domain,  \d ->
+     (lcall d) `latticeJoin` (pl ((SDGFunction $ Call l):d) ) )
+  _ -> lhat 
 
-transferFun Lattice{..} resultDict lnode lhat@(EmbPayload domain pl) = lhat
+transferFun Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = lhat
 
 --Go through our CFG and determine if an edge is a control-flow edges
 --to go in our call-graph
@@ -125,7 +125,7 @@ sdgProgInfo names eAnn = do
     return (pinfo, Set.toList sdgTargets)
 
 setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
-setFromEmb (EmbPayload _ lhat) = unSDG $ lhat []
+setFromEmb (EmbPayload (_, lhat)) = unSDG $ lhat []
 
 
 
@@ -139,7 +139,7 @@ removeDeadCode  targetVars e = case dependencyMap of
        $ removeDefs targetNodes depMap eAnn 
     -- $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where
-    eAnn = annotateCanonical (Map.empty)  (Label []) e
+    eAnn = annotateCanonical (Map.empty)  (Label 1) e
     dependencyMap = do
       (pinfo, targetNodes) <- sdgProgInfo targetVars eAnn
       let reachMap = callGraph eAnn
@@ -149,7 +149,7 @@ removeDeadCode  targetVars e = case dependencyMap of
               (embForwardSliceLat
                  (domain) $ Set.fromList targetNodes)
                (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo
-      let defMap = Map.map (\(EmbPayload _ lhat) -> lhat []) embDefMap 
+      let defMap = Map.map (\(EmbPayload (_, lhat)) -> lhat []) embDefMap 
       return $  (defMap, targetNodes)
 
 --Given a set of target nodes, a map from nodes to other nodes depending on that node,

@@ -164,11 +164,37 @@ makeGenericDefs = tformE
                   ()
                   (cid, (\_ (Canon.Definition p e t) -> GenericDef p (makeGenericDefs e) t), cid, cid)
 
-makeLabels :: Label -> Expr a (GenericDef a v) v -> Expr (a, Label) (GenericDef (a,Label) v) v
-makeLabels init = tformE
-  (\_ (Label l) -> map (\i -> Label $ [i]++l) [1..] )
+makeListLabels
+  :: [Int]
+  -> Expr a (GenericDef a v) v
+  -> Expr (a, [Int]) (GenericDef (a,[Int]) v) v
+makeListLabels init = tformE
+  (\_ (l) -> map (\i -> [i]++l) [1..] )
   (init)
-  ( (\c a -> (a,c)), \lab -> tformDef (makeLabels lab), cid, cid)
+  ( (\c a -> (a,c)), \lab -> tformDef (makeListLabels lab), cid, cid)
+
+makeLabels
+  :: Expr a (GenericDef a v) v
+  -> Expr (a, Label) (GenericDef (a,Label) v) v
+makeLabels e =
+  let
+    listLabeled = makeListLabels [] e
+    allLabels :: [[Int]]
+    allLabels = foldE
+      (\_ () -> repeat ())
+      ()
+      (\(GenericDef _ e v) -> [e])
+      (\ _ (A (a,c) _) subs -> [c] ++  (concat subs))
+      listLabeled
+    labelMap = Map.fromList $ zip allLabels [1..]
+    switchToInt e = tformE
+      (\ _ () -> repeat () )
+      ()
+      (\_ (a,c) -> (a, Label $ labelMap Map.! c),
+        \_ -> tformDef switchToInt,
+        cid, cid) e
+  in switchToInt listLabeled
+      
 
 addScope
   :: Env Label
@@ -186,7 +212,7 @@ varsForDef :: GenericDef a Var -> [Var.Canonical]
 varsForDef (GenericDef p e v) = getPatternVars p
 
 annotateCanonical :: Env Label -> Label -> Canon.Expr -> LabeledExpr
-annotateCanonical initEnv initLabel = (addScope initEnv) . (makeLabels initLabel) . makeGenericDefs 
+annotateCanonical initEnv initLabel = (addScope initEnv) . (makeLabels ) . makeGenericDefs 
 
 --Convert a labeled expression back to a canonical one
 toCanonical :: LabeledExpr -> Canon.Expr

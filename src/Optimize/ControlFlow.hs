@@ -54,7 +54,7 @@ getNodeLabel (Call n) = n
 getNodeLabel (Return _ n2) = n2
 getNodeLabel (ProcEntry n) = n
 getNodeLabel (ProcExit n) = n
-getNodeLabel _ = Label []
+getNodeLabel _ = Label 0
 
 
 mapGet :: (Ord k, Show k, Show a) => Map.Map k a -> k -> a
@@ -168,8 +168,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = do
             [ (exitNode thisFunInfo, retNode)
               ,(retNode, ourTail)
             ]
-      
-      --TODO add edges to function entry, assigning formals
+            --TODO add edges to function entry, assigning formals
       --TODO check for shadowing?
       case (fnArity == numArgs, inLocalScope) of
         (True, False) -> return $

@@ -60,7 +60,7 @@ instance (Show a) => Show (Env a)
 
 
 --TODO move to better place
-newtype Label = Label [Int]
+newtype Label = Label Int
   deriving (Eq, Ord, Show)
 
 type AExpr a = Expr a (GenericDef a Var) Var

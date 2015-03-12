@@ -98,7 +98,7 @@ getRelevantDefs  eAnn =
         --ourLat = reachingDefsLat iotaVal
         --(_, theDefsHat) = minFP ourLat transferFun pinfo
         (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
-        theDefs = trace ("\ngot fp defs" ++ show theDefsHat ) $ Map.map (\(EmbPayload _ lhat) -> lhat []) theDefsHat
+        theDefs = trace ("\ngot fp defs" ++ show theDefsHat ) $ Map.map (\(EmbPayload (_, lhat)) -> lhat []) theDefsHat
         --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = Map.mapWithKey
                        (\x (ReachingDefs s) ->
