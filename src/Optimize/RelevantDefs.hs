@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE StandaloneDeriving   #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE BangPatterns #-}
 module Optimize.RelevantDefs (getRelevantDefs) where
 
 import           AST.Annotation               (Annotated (..))
@@ -36,7 +37,7 @@ import           Debug.Trace                  (trace)
 contextDepth = 1
 
 insertAll :: Ord k => [(k,a)] -> Map.Map k a -> Map.Map k a
-insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs
+insertAll pairs theMap = List.foldl' (\m (k,a) -> Map.insert k a m) theMap pairs
 
 
 
@@ -84,19 +85,19 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
       let headDict = trace "Getting head dict" $ Map.unions headDicts
       let tailDict = Map.unions tailDicts
       functionEdgeListList <- forM defs (functionDefEdges (headDict, tailDict))
-      let initialNodes = [ProcEntry (getLabel body)| (GenericDef (Pattern.Var n) body _ ) <- defs ]
-      let controlEdges = concat $ edgeListList ++ functionEdgeListList
-      let edges = map (\(n1,n2) -> (getLabel `fmap` n1, getLabel `fmap` n2 ) ) controlEdges
+      let !initialNodes = [ProcEntry (getLabel body)| (GenericDef (Pattern.Var n) body _ ) <- defs ]
+      let !controlEdges = concat $ edgeListList ++ functionEdgeListList
+      let !edges = map (\(n1,n2) -> (getLabel `fmap` n1, getLabel `fmap` n2 ) ) controlEdges
       --edges = concat `fmap` edgeListList
-      let allNodes =  Set.toList $ Set.fromList $ concat [[x,y] | (x,y) <- edges] --TODO nub?
-      let progInfo =  makeProgramInfo (Set.fromList initialNodes) allNodes edges
-      let targetNodes = map (\n -> ProcExit n ) fnLabels
-      return (progInfo, allNodes, expDict, targetNodes, fnInfo, fnLabels)
+      let !allNodes =  Set.toList $ Set.fromList $ List.foldl' (\l (x,y) -> [x,y] ++ l ) []  edges --TODO nub?
+      let !progInfo =  makeProgramInfo (Set.fromList initialNodes) allNodes edges
+      let !targetNodes = map (\n -> ProcExit n ) fnLabels
+      return $! (progInfo, allNodes, expDict, targetNodes, fnInfo, fnLabels)
   in case maybeInfo of
     Nothing -> trace "Failed getting info" $ Nothing
     Just (pinfo, allNodes, expDict, targetNodes, fnInfo, fnLabels) ->
       let
-        intMap = Map.fromList $ zip allNodes [1..]
+        !intMap = Map.fromList $ zip allNodes [1..]
         labelInfo cnode = show  cnode
         nameMap = Map.mapWithKey
           (\node _ -> ("Node: " ++ labelInfo node ) ++ "\n\n" ++
@@ -104,12 +105,12 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
         reachMap = trace ("Call Graph\n\n" ++ (printGraph (intMap `mapGet`) (nameMap `mapGet`) pinfo) ++ "\n\n" ) $
           callGraph eAnn
         domain = map (\d -> map Call d) $ contextDomain fnLabels contextDepth reachMap
-        freeVars = getFreeVars allNodes
-        iotaVal = Set.fromList [] --TODO put back? -- [ (x, Nothing) | x <- freeVars]
-        ourLat = embellishedRD domain  iotaVal
+        --freeVars = getFreeVars allNodes
+        !iotaVal = Set.fromList [] --TODO put back? -- [ (x, Nothing) | x <- freeVars]
+        !ourLat = embellishedRD domain  iotaVal
         --ourLat = reachingDefsLat iotaVal
         --(_, theDefsHat) = minFP ourLat transferFun pinfo
-        (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
+        (_, !theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
         theDefs = Map.map (\(EmbPayload (_, lhat)) -> lhat []) theDefsHat
         --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = trace ("\n\nTheDefs \n\n" ++ (show theDefs) ++ "\n\n\n" ) $ Map.mapWithKey
@@ -183,21 +184,21 @@ reachingDefsLat iotaVal =
 
 
 removeKills :: LabelNode -> Set.Set RDef -> Set.Set RDef
-removeKills (Assign var _label) aIn = Set.filter (not . isKilled) aIn
-  where isKilled (setVar, _setLab) = (setVar == var)
+removeKills (Assign var _label) aIn = Set.filter (notKilled) aIn
+  where notKilled (!setVar, _setLab) = (setVar /= var)
 --Return is a special case, because there's an implicit unnamed variable we write to
 --removeKills (Return _fnVar label) aIn = Set.filter (not . isKilled) aIn
 --  where isKilled (setVar, _setLab) = (setVar == IntermedExpr label)
-removeKills (AssignParam var _ _label) aIn = Set.filter (not . isKilled) aIn
-  where isKilled (setVar, _setLab) = (setVar == var)
+removeKills (AssignParam var _ _label) aIn = Set.filter (notKilled) aIn
+  where notKilled (!setVar, _setLab) = (setVar /= var)
 removeKills _ aIn = aIn
 
 --TODO special case for return in ref-set
 
 gens :: LabelNode -> Set.Set RDef
-gens (Assign var label) = Set.singleton (var, label)
-gens (AssignParam var _ label) = Set.singleton (var, label)
-gens (ExternalCall v _) = Set.singleton (FormalReturn v, Label 0) --TODO what label?
+gens (Assign !var !label) = Set.singleton (var, label)
+gens (AssignParam !var _ !label) = Set.singleton (var, label)
+gens (ExternalCall !v _) = Set.singleton (FormalReturn v, Label 0) --TODO what label?
 gens _ = Set.empty
 
 

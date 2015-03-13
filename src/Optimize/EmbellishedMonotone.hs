@@ -80,7 +80,8 @@ liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload (dom
   EmbPayload (domain, \d -> case d of
     [] -> latticeBottom
     ( lc:dRest) -> let
-          possibleEnds = [ldom | ldom <- domain, (take depth (lc:ldom)) == (lc:dRest) ]
+          isGoodEnd ldom = (take depth (lc:ldom)) == (lc:dRest)
+          possibleEnds = filter isGoodEnd domain
         in if (Call label == lc)
            then joinAll lat [lhat dPoss | dPoss <- possibleEnds]
            else joinAll lat [lhat dPoss | dPoss <- possibleEnds]) --error "Invalid call string"
