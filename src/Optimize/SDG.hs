@@ -1,33 +1,33 @@
 {-# LANGUAGE RecordWildCards #-}
 module Optimize.SDG (removeModuleDeadCode) where
 
-import           AST.Annotation             (Annotated (..))
-import qualified AST.Expression.Canonical   as Canon
+import           AST.Annotation               (Annotated (..))
+import qualified AST.Expression.Canonical     as Canon
 import           AST.Expression.General
-import qualified AST.Module                 as Module
-import qualified AST.Pattern                as Pattern
+import qualified AST.Module                   as Module
+import qualified AST.Pattern                  as Pattern
 import           Control.Monad
-import qualified Data.List                  as List
-import qualified Data.Map                   as Map hiding ((!))
-import qualified Data.Set                   as Set
+import qualified Data.List                    as List
+import qualified Data.Map                     as Map hiding ((!))
+import qualified Data.Set                     as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
 
-import qualified AST.Variable as Variable
+import qualified AST.Variable                 as Variable
 
 import           Optimize.Environment
 import           Optimize.MonotoneFramework
 import           Optimize.Types
 
-import qualified AST.Variable as Var
+import qualified AST.Variable                 as Var
 
-import Optimize.EmbellishedMonotone
-import Optimize.ControlFlow hiding (trace)
-import Optimize.RelevantDefs
+import           Optimize.ControlFlow         hiding (trace)
+import           Optimize.EmbellishedMonotone
+import           Optimize.RelevantDefs
 
 --import Optimize.Reachability (reachabilityMap)
 
-import Debug.Trace (trace)
+import           Debug.Trace                  (trace)
 --trace _ x = x
 --How deep we go in our call strings for context
 contextDepth = 2
@@ -40,13 +40,13 @@ newtype SDG = SDG {unSDG :: Set.Set SDGNode}
   deriving (Eq, Ord, Show)
 
 makeTargetSet :: Set.Set LabelNode -> Set.Set SDGNode
-makeTargetSet = Set.map toSDG 
+makeTargetSet = Set.map toSDG
 
 toSDG :: LabelNode -> SDGNode
 toSDG lnode = case lnode of
   Assign var label -> SDGDef var label
   _ -> SDGLabel $ getNodeLabel lnode
-  
+
 
 forwardSliceLattice :: Set.Set SDGNode -> Lattice SDG
 forwardSliceLattice startDefs = Lattice {
@@ -76,11 +76,11 @@ transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = ca
     lc:d' -> let
         possibleEnds = [ldom | ldom <- domain, (take contextDepth (lc:ldom)) == (lc:d') ]
       in joinAll lat [pl dPoss | dPoss <- possibleEnds]) )
-  SDGFunction (Return fn l) -> let 
+  SDGFunction (Return fn l) -> let
       (EmbPayload (domain2, lcall)) = resultDict `mapGet` (SDGFunction $ Call l)
     in EmbPayload (domain,  \d ->
      (lcall d) `latticeJoin` (pl ((SDGFunction $ Call l):d) ) )
-  _ -> lhat 
+  _ -> lhat
 
 transferFun Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = lhat
 
@@ -93,7 +93,7 @@ isFunctionEdge edge = case edge of
   _ -> False
 
 makeFunctionEdge :: (LabelNode, LabelNode) -> (SDGNode, SDGNode)
-makeFunctionEdge (n1, n2) = (SDGFunction n1, SDGFunction n2) 
+makeFunctionEdge (n1, n2) = (SDGFunction n1, SDGFunction n2)
 
 sdgProgInfo
   :: Map.Map Var FunctionInfo
@@ -124,7 +124,7 @@ sdgProgInfo initFnInfo names eAnn = do
                 isTarget = lnode `Set.member` sdgTargets
               in isTarget
           }
-    
+
     return (pinfo, Set.toList sdgTargets)
 
 setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
@@ -140,7 +140,7 @@ removeDeadCode
 removeDeadCode initFnInfo targetVars e = case dependencyMap of
   Nothing -> trace "!!! Couldn't Optimize" e
   Just (depMap, targetNodes) -> trace "Opt Success" $ toCanonical
-       $ removeDefs targetNodes depMap eAnn 
+       $ removeDefs targetNodes depMap eAnn
     -- $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where
     eAnn = annotateCanonical (Map.empty)  (Label 1) e
@@ -153,7 +153,7 @@ removeDeadCode initFnInfo targetVars e = case dependencyMap of
               (embForwardSliceLat
                  (domain) $ Set.fromList targetNodes)
                (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo
-      let defMap = Map.map (\(EmbPayload (_, lhat)) -> lhat []) embDefMap 
+      let defMap = Map.map (\(EmbPayload (_, lhat)) -> lhat []) embDefMap
       return $  (defMap, targetNodes)
 
 --Given a set of target nodes, a map from nodes to other nodes depending on that node,
@@ -163,7 +163,7 @@ removeDefs
   -> Map.Map SDGNode SDG
   -> LabeledExpr
   -> LabeledExpr
-removeDefs targetNodes depMap eAnn =  
+removeDefs targetNodes depMap eAnn =
       removeDefsMonadic targetNodes depMap
       $ tformModEverywhere (\(A ann@(_,defLab,_env) eToTrans) ->
         case eToTrans of
@@ -191,7 +191,7 @@ removeDefsMonadic targetNodes depMap eAnn = trace ("!!Removing monadic defs  \n\
           newBody =
             if (trace ("\n Is Statement? " ++ show (isStateMonadFn ty)) $ isStateMonadFn ty)
             then (monadRemoveStatements (getLabel eAnn) targetNodes depMap (functionBody body ))
-            else body 
+            else body
         in GenericDef pat newBody ty) defList
 
 
@@ -207,7 +207,7 @@ monadRemoveStatements _defLabel targetNodes reachedNodesMap monadBody = trace "!
     (patStatements, lastStmt) = sequenceMonadic monadBody
     --patLabels = map snd patStatements
     --allStatements = (map fst patStatements) ++ [lastStmt]
-    
+
     newList = filter
       (\(stmt, (_,_)) -> let
           --TODO check, is this right? Why don't we look at pattern?
@@ -221,9 +221,9 @@ monadRemoveStatements _defLabel targetNodes reachedNodesMap monadBody = trace "!
          in isRel ) patStatements
     reAssemble [] accum = accum
     reAssemble ((stmt, (pat, expr)) : rest) accum =
-      reAssemble rest (A (getAnn expr) $ Binop op stmt (A (getAnn accum) $ Lambda pat accum)) 
+      reAssemble rest (A (getAnn expr) $ Binop op stmt (A (getAnn accum) $ Lambda pat accum))
   in reAssemble (reverse newList) lastStmt
-         
+
 
 
 --Given a list of target nodes,
@@ -241,12 +241,12 @@ defIsRelevant defLabel targetNodes reachedNodesMap (GenericDef pat expr _ty) = l
         isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
       in isRel
 
-   
+
 
 --TODO label definitions, not Let statements
 
 removeModuleDeadCode :: ModuleOptFun
-removeModuleDeadCode otherIfaces modName  (modul, iface) = trace (show modName) $ let  
+removeModuleDeadCode otherIfaces modName  (modul, iface) = trace (show modName) $ let
     fnInfo = interfaceFnInfo otherIfaces
     isValue value = case value of --TODO remove
       Variable.Value s -> True

@@ -1,27 +1,28 @@
-{-# LANGUAGE StandaloneDeriving, FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances  #-}
+{-# LANGUAGE StandaloneDeriving #-}
 module Optimize.Types where
 
-import qualified AST.Pattern as Pattern
+import qualified AST.Annotation           as Annotate
 import qualified AST.Expression.Canonical as Canon
-import AST.Type as CanonicalType
-import AST.Expression.General
-import qualified AST.Annotation as Annotate
-import qualified AST.Variable as Var
-import qualified Data.Map as Map
-import qualified Elm.Compiler.Module as PublicModule
-import Text.PrettyPrint as P 
+import           AST.Expression.General
+import qualified AST.Pattern              as Pattern
+import           AST.Type                 as CanonicalType
+import qualified AST.Variable             as Var
+import qualified Data.Map                 as Map
+import qualified Elm.Compiler.Module      as PublicModule
+import           Text.PrettyPrint         as P
 
-import AST.PrettyPrint
+import           AST.PrettyPrint
 
 
 --Generic place to put types and definitions
 --To avoid dep cycles
 
 
-type WholeProgOptFun = 
-  [PublicModule.Name] 
+type WholeProgOptFun =
+  [PublicModule.Name]
   -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
-  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface) 
+  -> Map.Map PublicModule.Name (PublicModule.Module, PublicModule.Interface)
 
 type ModuleOptFun = Map.Map PublicModule.Name PublicModule.Interface
                     -> PublicModule.Name
@@ -46,7 +47,7 @@ type CanonEnv = Env Var.Canonical
 
 
 data GenericDef a v = GenericDef {
-  defPat :: Pattern,
+  defPat  :: Pattern,
   defBody :: (Expr a (GenericDef a v) v),
   defType:: (Maybe CanonicalType) }
 
@@ -58,7 +59,7 @@ instance Pretty LabelDef where
         annotation = case maybeTipe of
                        Nothing -> P.empty
                        Just tipe -> pretty pattern <+> P.colon <+> pretty tipe
-                      
+
 type LabelDef = GenericDef (Region, Label, Env Label) Var
 
 deriving instance Show LabelDef
@@ -81,7 +82,7 @@ type AExpr' a = Expr' a (GenericDef a Var) Var
 
 type LabeledExpr = AExpr (Region, Label, Env Label)
 type LabeledExpr' = AExpr' (Region, Label, Env Label)
-                        
+
 --Basic getter for labels
 getLabel :: LabeledExpr -> Label
 getLabel (Annotate.A (_,a,_) _) = a

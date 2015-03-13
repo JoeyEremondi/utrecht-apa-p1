@@ -1,19 +1,21 @@
-{-# LANGUAGE StandaloneDeriving, DeriveFunctor, FlexibleInstances #-}
+{-# LANGUAGE DeriveFunctor      #-}
+{-# LANGUAGE FlexibleInstances  #-}
+{-# LANGUAGE StandaloneDeriving #-}
 module Optimize.Traversals where
 
-import Optimize.Environment
+import           Optimize.Environment
 
-import  AST.Expression.General
-import AST.Annotation (Annotated(A))
-import qualified AST.Pattern as Pattern
+import           AST.Annotation           (Annotated (A))
 import qualified AST.Expression.Canonical as Canon
-import qualified AST.Variable as Var 
-import qualified AST.Type as Type
-import qualified AST.Module as Module
-import qualified Data.Map as Map
+import           AST.Expression.General
+import qualified AST.Module               as Module
+import qualified AST.Pattern              as Pattern
+import qualified AST.Type                 as Type
+import qualified AST.Variable             as Var
+import qualified Data.Map                 as Map
 --import qualified AST.Annotation as Annotation
 
-import Optimize.Types
+import           Optimize.Types
 
 --Given:
 --A function producing a new context for each child expression or def
@@ -77,7 +79,7 @@ tformEE cf ctxList ctx f@(fa, fd, fv, fe) exp = let
    (PortOut s t e) -> PortOut s (tformT (fv ctx) t) $ tformE cf ctx1 f e
    (GLShader s1 s2 ty) -> GLShader s1 s2 ty
 
-  
+
 --Transform a pattern
 --For these ones, there's only one type argument, so we can derive functor
 tformP :: (v -> vv) -> Pattern.Pattern v -> Pattern.Pattern vv
@@ -124,7 +126,7 @@ foldEE ctxList cf ctx fd f rootE = let
     (Lambda pat body) -> [foldE cf ctx1 fd f body]
     (App e1 e2) -> [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]
     (MultiIf exprs) ->  concatMap (\(e1, e2) -> [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]) exprs
-    (Let defs body) -> 
+    (Let defs body) ->
                        (map (\(c,e) -> foldE cf c fd f e ) $ zip ctxTail (concatMap fd defs))
                        ++ [foldE cf ctx1 fd f body]
     (Case e1 cases) ->  [foldE cf ctx1 fd f e1]
@@ -132,7 +134,7 @@ foldEE ctxList cf ctx fd f rootE = let
     (Data ctor exprs) ->   map (\(c,e) -> foldE cf c fd f e) $ zip ctxList exprs
    --record cases
     (Access e1 field) -> [foldE cf ctx1 fd f e1]
-    (Remove e1 field) -> [foldE cf ctx1 fd f e1] 
+    (Remove e1 field) -> [foldE cf ctx1 fd f e1]
     (Insert e1 field e2) ->  [foldE cf ctx1 fd f e1, foldE cf ctx2 fd f e2]
     (Modify e1 mods) ->  [foldE cf ctx1 fd f e1]
                         ++ (map ((\(c,e) -> foldE cf c fd f e) ) $ zip ctxTail $ map snd mods)
@@ -194,7 +196,7 @@ makeLabels e =
         \_ -> tformDef switchToInt,
         cid, cid) e
   in switchToInt listLabeled
-      
+
 
 addScope
   :: Env Label
@@ -212,7 +214,7 @@ varsForDef :: GenericDef a Var -> [Var.Canonical]
 varsForDef (GenericDef p e v) = getPatternVars p
 
 annotateCanonical :: Env Label -> Label -> Canon.Expr -> LabeledExpr
-annotateCanonical initEnv initLabel = (addScope initEnv) . (makeLabels ) . makeGenericDefs 
+annotateCanonical initEnv initLabel = (addScope initEnv) . (makeLabels ) . makeGenericDefs
 
 --Convert a labeled expression back to a canonical one
 toCanonical :: LabeledExpr -> Canon.Expr
@@ -261,7 +263,7 @@ expContainsVar e v =
     (or subContains) || case expr of
       Var vexp -> v == vexp
       _ -> False) e
-  
+
 expContainsLabel :: LabeledExpr -> Label -> Bool
 expContainsLabel e lin =
   foldE

@@ -1,14 +1,14 @@
 module Optimize.Environment where
 
-import qualified Data.Map as Map hiding ((!))
-import AST.Expression.General 
-import AST.Annotation
-import qualified AST.Pattern as Pattern
-import Elm.Compiler.Module
-import AST.Module (body, program)
-import qualified AST.Variable as Var
-import qualified Data.List as List
-import Optimize.Types
+import           AST.Annotation
+import           AST.Expression.General
+import           AST.Module             (body, program)
+import qualified AST.Pattern            as Pattern
+import qualified AST.Variable           as Var
+import qualified Data.List              as List
+import qualified Data.Map               as Map hiding ((!))
+import           Elm.Compiler.Module
+import           Optimize.Types
 --import AST.Expression.Canonical as Canon
 
 
@@ -24,7 +24,7 @@ nameToVar (Name lReversed) = case l of
   [n] -> Var.Canonical Var.Local n
   (n:reversedPath) -> Var.Canonical (Var.Module $ reverse reversedPath) n
   where l = reverse lReversed
-        
+
 getPatternVars :: Pattern.CanonicalPattern  -> [Var]
 getPatternVars (Pattern.Data _ pats) = concatMap getPatternVars pats
 getPatternVars (Pattern.Record strs) = map makeLocal strs --TODO check this case
@@ -52,7 +52,7 @@ globalEnv :: LabeledExpr ->  Env Label
 globalEnv expr  =
   let
     (A (_,label,_) (Let defs _)) = expr
-    
+
   in foldr (\(GenericDef pat _ _) env ->
              foldr (\v newEnv -> Map.insert v label newEnv) env (getPatternVars pat)) Map.empty defs
 

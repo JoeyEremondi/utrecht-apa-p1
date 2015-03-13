@@ -1,20 +1,20 @@
 module Optimize.Reachability (removeUnreachable, removeUnreachableModule, reachabilityMap) where
 
-import Optimize.MonotoneFramework
+import           Optimize.MonotoneFramework
 
-import Elm.Compiler.Module
-import qualified AST.Module as Module
-import qualified Data.Map as Map hiding ((!))
-import AST.Expression.General
-import qualified AST.Expression.Canonical as Canon
-import AST.Annotation
-import Optimize.Environment
-import AST.Variable as Var
-import Optimize.Traversals
+import           AST.Annotation
+import qualified AST.Expression.Canonical   as Canon
+import           AST.Expression.General
+import qualified AST.Module                 as Module
+import           AST.Variable               as Var
+import qualified Data.Map                   as Map hiding ((!))
+import           Elm.Compiler.Module
+import           Optimize.Environment
+import           Optimize.Traversals
 
-import Optimize.Types
+import           Optimize.Types
 
-import Debug.Trace (trace)
+import           Debug.Trace                (trace)
 
 newtype IsReachable = IsReachable {fromReachable :: Bool}
   deriving (Eq, Ord, Show)

@@ -1,19 +1,21 @@
-{-# LANGUAGE RecordWildCards, ScopedTypeVariables, FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Optimize.EmbellishedMonotone where
 
-import Optimize.MonotoneFramework
-import Optimize.Types
-import Optimize.ControlFlow
 import           AST.Annotation             (Annotated (..))
-import AST.Expression.General
+import           AST.Expression.General
 import qualified AST.Pattern                as Pattern
-import Optimize.Traversals
-import qualified Data.List as List
+import qualified Data.List                  as List
+import           Optimize.ControlFlow
+import           Optimize.MonotoneFramework
+import           Optimize.Traversals
+import           Optimize.Types
 
-import Debug.Trace (trace)
+import           Debug.Trace                (trace)
 
 
-import qualified Data.Map as Map
+import qualified Data.Map                   as Map
 
 newtype EmbPayload a b = EmbPayload ([[a]], ([a] -> b))
 
@@ -22,7 +24,7 @@ instance (Show b, Show a) => Show (EmbPayload a b)
     show (EmbPayload (domain, lhat)) =
       (List.intercalate " ;; " $
         map (\ d -> (show d) ++ " -> " ++ (show $ lhat d)) domain) ++ "\n"
-      
+
 
 {-
 liftJoin
@@ -86,7 +88,7 @@ liftToFn _ _ _f fret resultMap rnode@(Return _ label) (EmbPayload (domain, lhat'
   let
     (EmbPayload (_, lhat)) = (resultMap Map.! (Call label) )
   in EmbPayload (domain,
-                 \d -> --We assume they have the same domain 
+                 \d -> --We assume they have the same domain
                    fret (Call label, rnode)  (lhat d, lhat' ((Call label):d) ) )
 liftToFn _ _ f _ resultMap lnode (EmbPayload (domain, lhat)) = let
     simpleMap = (error "Shouldn't use resultMap in non lifted this case" )
@@ -121,7 +123,7 @@ contextDomain :: Int -> Map.Map Label [Label] -> [[Label]]
 contextDomain n callMap = let
     allLabels = Map.keys callMap
   in helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
-  where 
+  where
     helper 0 _ _ = [[]]
     helper 1 _ accum = accum
     helper n callMap accum = let

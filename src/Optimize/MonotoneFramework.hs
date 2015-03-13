@@ -12,24 +12,24 @@ module Optimize.MonotoneFramework (
   printGraph
   )where
 
-import qualified Data.Set as Set
+import qualified Data.Set                          as Set
 --import Data.Ix
 --import Data.Array.ST
 --import Control.Monad
 --import Control.Monad.ST
-import qualified Data.Map as Map
+import qualified Data.Map                          as Map
 --import qualified Data.Array as Array
 
-import qualified Data.Graph.Inductive.Graph as Graph
+import qualified Data.Graph.Inductive.Graph        as Graph
 import qualified Data.Graph.Inductive.PatriciaTree as Gr
 
-import qualified Data.GraphViz as Viz
-import Data.GraphViz.Printing (renderDot)
+import qualified Data.GraphViz                     as Viz
 import qualified Data.GraphViz.Attributes.Complete as VA
+import           Data.GraphViz.Printing            (renderDot)
 
-import Optimize.Types
+import           Optimize.Types
 
-import Data.Text.Lazy (unpack, pack)
+import           Data.Text.Lazy                    (pack, unpack)
 
 --import Debug.Trace (trace)
 --TODO remove
@@ -43,19 +43,19 @@ newtype FlowEdge label = FlowEdge (label, label)
 data AnalysisDirection = ForwardAnalysis | BackwardAnalysis
 
 data ProgramInfo label = ProgramInfo {
-  edgeMap :: label -> [label],
+  edgeMap    :: label -> [label],
   --labelRange :: (label, label),
-  allLabels :: [label],
+  allLabels  :: [label],
   labelPairs :: [(label, label)],
   isExtremal :: label -> Bool
-  
+
   }
 
 printGraph
   :: (Ord label)
   => (label -> Int)
   -> (label -> String)
-  -> ProgramInfo label 
+  -> ProgramInfo label
   -> String
 printGraph intMap strMap pInfo =
   let
@@ -64,7 +64,7 @@ printGraph intMap strMap pInfo =
     edges = map (\(n1, n2) -> (intMap n1, intMap n2, () ) ) (labelPairs pInfo)
     theGraph = (Graph.insEdges edges grWithNodes) :: (Gr.Gr String () )
     defaultParams = Viz.defaultParams :: (Viz.GraphvizParams Graph.Node String () () String )
-    ourParams = defaultParams {Viz.fmtNode = \(_,s) -> [VA.Label $ VA.StrLabel $ pack s]} 
+    ourParams = defaultParams {Viz.fmtNode = \(_,s) -> [VA.Label $ VA.StrLabel $ pack s]}
   in unpack $ renderDot $ Viz.toDot $ Viz.graphToDot ourParams theGraph
 
 
@@ -79,9 +79,9 @@ getFlowEdge BackwardAnalysis (l1, l2) = FlowEdge (l2, l1)
 data Lattice a = Lattice {
   --latticeTop :: a
   latticeBottom :: a,
-  latticeJoin :: a -> a -> a,
-  iota :: a, --Extremal value for our analysis
-  lleq :: a -> a -> Bool,
+  latticeJoin   :: a -> a -> a,
+  iota          :: a, --Extremal value for our analysis
+  lleq          :: a -> a -> Bool,
   flowDirection :: AnalysisDirection
   }
 
@@ -93,10 +93,10 @@ joinAll Lattice{..} = foldr latticeJoin latticeBottom
 --We don't actually need to pass in bottom, but it helps the typechecker
 --figure out which lattice we're using
 minFP :: (Ord label, Show label, Show payload) =>
-         Lattice payload 
+         Lattice payload
          -> (Map.Map label payload -> label -> payload -> payload)
          -> ProgramInfo label
-         -> (Map.Map label payload, Map.Map label payload) 
+         -> (Map.Map label payload, Map.Map label payload)
 minFP lat@(Lattice{..}) f info = trace ("In MinFP" ++ show (length $ labelPairs info) ) $ (mfpOpen, mfpClosed)
   where
     mfpClosed = Map.mapWithKey (f mfpOpen) mfpOpen
@@ -110,23 +110,23 @@ minFP lat@(Lattice{..}) f info = trace ("In MinFP" ++ show (length $ labelPairs 
     iterateSolns currentSolns [] = trace "!!!!!!!Done FP Iter\n\n" $ currentSolns
     iterateSolns currentSolns (cfgEdge:rest) = trace ("FP Iter" ++ show cfgEdge ) $ let
       flowEdge = getFlowEdge flowDirection cfgEdge
-      (FlowEdge (l,l')) = flowEdge 
+      (FlowEdge (l,l')) = flowEdge
       al = currentSolns Map.! l
       al' = currentSolns Map.! l'
       fal = f currentSolns l al
       (newPairs, newSolns) =
-        if (trace ("FP Comparing label\n" ++ (show l) ++ "\n***" ++ (show fal) ++ "\n***" ++ (show al') ) $ not $ fal `lleq` al') 
+        if (trace ("FP Comparing label\n" ++ (show l) ++ "\n***" ++ (show fal) ++ "\n***" ++ (show al') ) $ not $ fal `lleq` al')
         then trace "Adding edge" $ let
             theMap = Map.insert l' (latticeJoin fal al') currentSolns
             thePairs = map (\lNeighbour -> (l', lNeighbour) ) $ edgeMap info l'
           in (thePairs, theMap)
         else trace "Didn't add a new edge " $ ([], currentSolns)
       in iterateSolns newSolns (newPairs ++ rest)
-        
-      
-      
-    
-          
+
+
+
+
+
 
 
 
