@@ -122,7 +122,11 @@ tailAssign :: Label ->  LabeledExpr -> ControlNode
 tailAssign label tailExpr = Assign (IntermedExpr label) tailExpr
 
 binOpToFn :: LabeledExpr -> LabeledExpr
-binOpToFn (A ann (Binop op _ _)) = A ann $ Var op
+binOpToFn (A ann (Binop op e1 e2)) =
+  let
+    opFn = A ann $ Var op
+    firstFun = A ann $ App opFn e1
+  in A ann $ App firstFun e2
 
 connectLists :: ([ControlNode], [ControlNode]) -> [ControlEdge]
 connectLists (l1, l2) = [(n1, n2) | n1 <- l1, n2 <- l2]
