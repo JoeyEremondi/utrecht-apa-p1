@@ -8,7 +8,8 @@ module Optimize.MonotoneFramework (
   ProgramInfo(..),
   Lattice(..),
   joinAll,
-  minFP
+  minFP,
+  printGraph
   )where
 
 import qualified Data.Set as Set
@@ -18,6 +19,17 @@ import qualified Data.Set as Set
 --import Control.Monad.ST
 import qualified Data.Map as Map
 --import qualified Data.Array as Array
+
+import qualified Data.Graph.Inductive.Graph as Graph
+import qualified Data.Graph.Inductive.PatriciaTree as Gr
+
+import qualified Data.GraphViz as Viz
+import Data.GraphViz.Printing (renderDot)
+import qualified Data.GraphViz.Attributes.Complete as VA
+
+import Optimize.Types
+
+import Data.Text.Lazy (unpack, pack)
 
 --import Debug.Trace (trace)
 --TODO remove
@@ -38,6 +50,23 @@ data ProgramInfo label = ProgramInfo {
   isExtremal :: label -> Bool
   
   }
+
+printGraph
+  :: (Ord label)
+  => (label -> Int)
+  -> (label -> String)
+  -> ProgramInfo label 
+  -> String
+printGraph intMap strMap pInfo =
+  let
+    nodes = map (\n -> (intMap n, strMap n)) $ allLabels pInfo
+    grWithNodes = (Graph.insNodes nodes Graph.empty) :: (Gr.Gr String ())
+    edges = map (\(n1, n2) -> (intMap n1, intMap n2, () ) ) (labelPairs pInfo)
+    theGraph = (Graph.insEdges edges grWithNodes) :: (Gr.Gr String () )
+    defaultParams = Viz.defaultParams :: (Viz.GraphvizParams Graph.Node String () () String )
+    ourParams = defaultParams {Viz.fmtNode = \(_,s) -> [VA.Label $ VA.StrLabel $ pack s]} 
+  in unpack $ renderDot $ Viz.toDot $ Viz.graphToDot ourParams theGraph
+
 
 getFlowEdge :: AnalysisDirection -> (label,label) -> FlowEdge label
 getFlowEdge ForwardAnalysis e = FlowEdge e

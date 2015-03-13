@@ -138,7 +138,9 @@ Library
         union-find >= 0.2 && < 0.3,
         unordered-containers >= 0.1 && < 0.3,
         array,
-        elm-core-sources
+        elm-core-sources,
+        fgl,
+        graphviz
 
 
 Executable elm-doc

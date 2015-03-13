@@ -108,13 +108,13 @@ sdgProgInfo initFnInfo names eAnn = do
     let controlEdges = [] --TODO need control flow edges?s
     let dataEdges =
           concat $ Map.elems $ Map.mapWithKey
-            (\n rdSet -> [(SDGDef var def, toSDG n) | (var, Just def) <- (Set.toList rdSet)] ) relevantDefs
+            (\n rdSet -> [(SDGDef var def, toSDG n) | (var,  def) <- (Set.toList rdSet)] ) relevantDefs
     let originalLabels = map toSDG $ Map.keys relevantDefs
     --If n1 depends on def at label lab, then we have lab -> n1 as dependency
     --TODO is this right?
     --let dataEdges = map (\(n1, lab) -> (SDGLabel lab, toSDG n1)  ) relevantDefEdges
     let allEdges =  callEdges ++ controlEdges ++ dataEdges
-    let sdgTargets = makeTargetSet $ Set.fromList targetNodes
+    let sdgTargets = trace ("SDG Edges " ++ show allEdges )$ makeTargetSet $ Set.fromList targetNodes
     let pinfo =
           ProgramInfo {
             edgeMap = \lnode -> [l2 | (l1, l2) <- allEdges, l1 == lnode], --TODO make faster
@@ -158,23 +158,79 @@ removeDeadCode initFnInfo targetVars e = case dependencyMap of
 
 --Given a set of target nodes, a map from nodes to other nodes depending on that node,
 --And a module's expression, traverse the tree and remove unnecessary Let definitions
-removeDefs targetNodes depMap eAnn = 
-      tformModEverywhere (\(A ann@(_,defLab,_env) eToTrans) ->
+removeDefs
+  :: [Optimize.SDG.SDGNode]
+  -> Map.Map SDGNode SDG
+  -> LabeledExpr
+  -> LabeledExpr
+removeDefs targetNodes depMap eAnn =  
+      removeDefsMonadic targetNodes depMap
+      $ tformModEverywhere (\(A ann@(_,defLab,_env) eToTrans) ->
         case eToTrans of
-          Let defs body -> A ann $
-            Let (filter (defIsRelevant defLab targetNodes depMap ) defs) body
+          Let defs defBody -> let
+              newDefs = (filter (defIsRelevant defLab targetNodes depMap ) defs)
+             in A ann $ Let (newDefs) defBody
           _ -> A ann eToTrans ) eAnn
 
+removeDefsMonadic
+  :: [Optimize.SDG.SDGNode]
+  -> Map.Map SDGNode SDG
+  -> LabeledExpr
+  -> LabeledExpr
+removeDefsMonadic targetNodes depMap eAnn = trace ("!!Removing monadic defs  \n\n" ) $ case eAnn of
+  (A ann (Let defs body)) ->
+    let
+      newDefs = (cleanDefs defs)
+      newBody = removeDefsMonadic targetNodes depMap body
+    in (A ann $ Let newDefs newBody)
+  _ -> eAnn
+  where
+      cleanDefs defList =
+        map
+        (\d@(GenericDef pat body ty) -> let
+          newBody =
+            if (trace ("\n Is Statement? " ++ show (isStateMonadFn ty)) $ isStateMonadFn ty)
+            then (monadRemoveStatements (getLabel eAnn) targetNodes depMap (functionBody body ))
+            else body 
+        in GenericDef pat newBody ty) defList
 
 
+getAnn (A a _) = a
 
+--Given a list of target nodes,
+-- a mapping of nodes to nodes they are relevant to (result of our FP iteration)
+-- and a Definition, return true if we should keep the definition
+monadRemoveStatements :: Label -> [SDGNode] -> Map.Map SDGNode SDG -> LabeledExpr -> LabeledExpr
+monadRemoveStatements _defLabel targetNodes reachedNodesMap monadBody = trace "!!!MonadRemove"$
+  let
+    op = Var.Canonical (Var.Module ["State", "Escapable"] ) ("andThen")
+    (patStatements, lastStmt) = sequenceMonadic monadBody
+    --patLabels = map snd patStatements
+    --allStatements = (map fst patStatements) ++ [lastStmt]
+    
+    newList = filter
+      (\(stmt, (_,_)) -> let
+          --TODO check, is this right? Why don't we look at pattern?
+           ourAssigns = [(SDGDef var compLab) |
+                                     (SDGDef var compLab)<-Map.keys reachedNodesMap,
+                                     compLab == getLabel stmt]--TODO make faster
+           reachedNodes = Set.unions $ map
+             (\varNode -> case (reachedNodesMap `mapGet` varNode) of
+                    x -> unSDG x) ourAssigns
+           isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
+         in isRel ) patStatements
+    reAssemble [] accum = accum
+    reAssemble ((stmt, (pat, expr)) : rest) accum =
+      reAssemble rest (A (getAnn expr) $ Binop op stmt (A (getAnn accum) $ Lambda pat accum)) 
+  in reAssemble (reverse newList) lastStmt
+         
 
 
 --Given a list of target nodes,
 -- a mapping of nodes to nodes they are relevant to (result of our FP iteration)
 -- and a Definition, return true if we should keep the definition
 defIsRelevant :: Label -> [SDGNode] -> Map.Map SDGNode SDG -> LabelDef -> Bool
-defIsRelevant defLabel targetNodes reachedNodesMap def@(GenericDef pat expr _ty) = let
+defIsRelevant defLabel targetNodes reachedNodesMap (GenericDef pat expr _ty) = let
         definedVars = getPatternVars pat
         definedVarPlusses = map (\v -> NormalVar v defLabel) definedVars
         nodesForDefs = map (\var -> SDGDef var (getLabel expr)) definedVarPlusses

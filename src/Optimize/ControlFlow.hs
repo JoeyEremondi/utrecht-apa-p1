@@ -59,6 +59,8 @@ data ControlNode' expr =
     deriving (Functor, Eq, Ord, Show)
 
 
+
+
 getNodeLabel :: ControlNode' Label -> Label
 getNodeLabel (Branch n) = n
 getNodeLabel (ExternalCall _ _) = Label 0 --TODO better default?
@@ -143,7 +145,7 @@ oneLevelEdges
     --,[ControlNode]
     ,[ControlEdge])
 oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level Defs\n" $ do
-  (headMaps, tailMaps, {-subNodesL,-} subEdgesL) <- trace "Top Unzip" $ List.unzip3 `fmap` (trace "Top Unzip" $ mapM id (trace "OLE" maybeSubInfo)) --Edges and nodes from our sub-expressions
+  (headMaps, tailMaps, {-subNodesL,-} subEdgesL) <- List.unzip3 `fmap` (mapM id maybeSubInfo) --Edges and nodes from our sub-expressions
   --let subNodes = concat subNodesL
   let headMap = Map.unions headMaps
   let tailMap = Map.unions tailMaps
@@ -157,14 +159,14 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
         True -> do
           (newHeads, newTails, specialEdges) <- specialFnEdges fnInfo (headMap, tailMap) e
           return (newHeads, newTails, subEdges ++ specialEdges)
-        False -> trace "Not special fn" $ do
+        False -> do
           let numArgs = length argList
           let mThisFunInfo = Map.lookup fnName fnInfo
           case (mThisFunInfo) of
-            Nothing -> error $ "Function not in scope" ++ show fnName ++ (show $ Map.keys fnInfo) 
+            Nothing -> Nothing --Means we found a Native module, so don't optimize 
             Just (thisFunInfo) -> do
               let fnArity = arity thisFunInfo
-              let inLocalScope = trace "Env look 1" $ case (Map.lookup fnName env) of
+              let inLocalScope = case (Map.lookup fnName env) of
                     Nothing -> False
                     Just fnLab -> (Just fnLab) == (topFnLabel thisFunInfo)
               let argNodes = paramNodes argList
@@ -202,10 +204,13 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
                              assignParamEdges ++ calcNextParamEdges ++ assignFormalEdges ++
                                gotoFormalEdges ++ callEdges ++
                                callEdges ++ returnEdges ++ subEdges  ) --TODO app edges
+                --If we haven't applied all the arguments, we just do nothing
+                --And hope we'll find the full application further up in the tree
+                (False, False) -> return $ (headMap, tailMap, subEdges)
           
-            _ -> trace "!!!Locally Defd or not full" $ error "LocalDef" -- $Nothing
+                _ -> Nothing
             --If function is locally defined, or not fully instantiated, we fail
-    Lambda _ _ -> trace "!!!Lambda def" $ error "LambdaDef" -- $ Nothing
+    Lambda _ _ -> trace "!!!Lambda def" $  Nothing
     Binop op e1 e2 -> case (isArith op) of
       True -> return (Map.insert (getLabel e) (headMap `mapGet` (getLabel e1)) headMap  
                         , Map.insert (getLabel e) (tailMap `mapGet` (getLabel e2)) headMap
@@ -253,8 +258,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let ourHead = headMap `mapGet` (getLabel caseExpr)
       let ourTail = [Assign (IntermedExpr (getLabel e)) theCase | theCase <- caseTailExprs]
             
-      let caseHeads = trace ("####### Got Case Tails " ++ show caseTails ) $concatMap (\cs -> headMap `mapGet` (getLabel cs) ) cases
-      let branchEdges = trace ("####### Got Case heads " ++ show caseHeads ) $ connectLists (ourHead, [branchNode])
+      let caseHeads = concatMap (\cs -> headMap `mapGet` (getLabel cs) ) cases
+      let branchEdges = connectLists (ourHead, [branchNode])
       let caseEdges =  connectLists ([branchNode], caseHeads)
 
       let endEdges = connectLists (caseTails, ourTail)
@@ -371,7 +376,9 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   let ourTail = [ProcExit e]
   let bodyTails = tailExprs body
   let tailNodes = concatMap (\e -> tailMap `mapGet` (getLabel e) ) bodyTails 
-  let assignReturns = [Assign (FormalReturn (nameToCanonVar name) ) body]
+  let assignReturns = [AssignParam
+                        (FormalReturn (nameToCanonVar name) )
+                        (IntermedExpr $ getLabel body) body]
   let assignParams =
         [(AssignParam (FormalParam pat label) (NormalVar v argLab) body) |
            (pat,argLab) <- argPatLabels, v <- argVars]
@@ -394,41 +401,42 @@ monadicDefEdges
     Map.Map Label [ControlNode],
     Map.Map Label [ControlNode],
     [(ControlNode, ControlNode)] )
-monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e@(A _ expr) _) = do
-  let (firstStmt, patternStmts) = sequenceMonadic e
-  let otherStmts = (map snd patternStmts) :: [LabeledExpr]
-  statementInfoTail <- forM otherStmts (allExprEdges fnInfo)
-  statementInfoHead <- allExprEdges fnInfo firstStmt
-  let patLabels = (map fst patternStmts)
-  let statementInfo = (statementInfoHead:statementInfoTail)
-  let zippedInfo = zip (firstStmt:(map snd patternStmts)) statementInfo
-  let linkStatementEdges ((pat,andThenExpr), info1, info2) = do
-        let (s1, (headMap1, tailMap1, _)) = info1
-        let (s2, (headMap2, tailMap2, _)) = info2
+monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
+  let body = functionBody e
+  let (patternStmts, lastStmt) = sequenceMonadic body
+  let allStmts = (map fst (patternStmts)) ++ [lastStmt]
+  let patternLabels = map snd patternStmts
+  statementNodes <- forM allStmts (allExprEdges fnInfo)
+  
+  let linkStatementEdges (stmtInfo1, (pat,andThenExpr), stmtInfo2) = do
+        let (s1, (_, tailMap1, _)) = stmtInfo1
+        let (s2, (headMap2, _, _)) = stmtInfo2
         let s1Tail = tailMap1 `mapGet` (getLabel s1)
         let s2Head = headMap2 `mapGet` (getLabel s2)
+        --TODO is this the right label?
         let assignParamNode = AssignParam (FormalParam pat (getLabel s2)) (IntermedExpr (getLabel s1)) andThenExpr
         return $  (connectLists (s1Tail, [assignParamNode] )) ++ (connectLists ([assignParamNode], s2Head))
-  
-  let edgeTriples =  (zip3 patLabels (tail zippedInfo) (init zippedInfo))
+
+  let stmtsAndNodes = zip allStmts statementNodes
+  let edgeTriples =  zip3 (init stmtsAndNodes) patternLabels (tail stmtsAndNodes)
   let betweenStatementEdges = concatMap linkStatementEdges edgeTriples
-  let combinedHeads = Map.unions $ map (\(hmap,_,_) -> hmap) statementInfo
-  let combinedTails = Map.unions $ map (\(_, tmap, _) -> tmap) statementInfo
-  let lastStatementTails = combinedTails `mapGet` (getLabel $ last otherStmts )
+  let combinedHeads = Map.unions $ map (\(hmap,_,_) -> hmap) statementNodes
+  let combinedTails = Map.unions $ map (\(_, tmap, _) -> tmap) statementNodes
+  let lastStatementTails = combinedTails `mapGet` (getLabel $ lastStmt )
   let ourTails =
         [AssignParam
-         (FormalReturn $ nameToCanonVar fnName)
-         (IntermedExpr $ getLabel $ last otherStmts)
+         (IntermedExpr (getLabel body))
+         (IntermedExpr $ getLabel $ lastStmt)
          e]
   let finalAssignEdges = connectLists(lastStatementTails, ourTails)
   let newHeads =
-        Map.insert (getLabel e) (combinedHeads `mapGet` (getLabel firstStmt)) combinedHeads
+        Map.insert (getLabel body) (combinedHeads `mapGet` (getLabel $ head allStmts)) combinedHeads
   let newTails =
-        Map.insert (getLabel e) ourTails combinedTails
+        Map.insert (getLabel body) ourTails combinedTails
   return $ (newHeads,
            newTails,
            finalAssignEdges ++ concat betweenStatementEdges
-             ++ concatMap (\(_,_,edges) -> edges) statementInfo)
+             ++ concatMap (\(_,_,edges) -> edges) statementNodes)
   
     
 varAssign :: Label -> Pattern -> LabeledExpr -> [ControlNode]
@@ -460,28 +468,31 @@ functionArgLabels _ = []
 --Get the "final" return type of a function type
 --i.e. what's returned if it is fully applied
 functionFinalReturnType :: Type.CanonicalType -> Type.CanonicalType
-functionFinalReturnType (Type.Lambda _ ret) = functionFinalReturnType ret
+functionFinalReturnType t@(Type.Lambda _ ret) = trace ("\nFinal Ret "  ++ show ret) $functionFinalReturnType ret
 functionFinalReturnType t = t
 
 --Our special State monad for imperative code                           
-stateMonadTycon = Type.Var ("EState")
+stateMonadTycon = Type.Type $ Var.Canonical {Var.home = Var.Module ["State","Escapable"], Var.name = "EState"}
 
 --Check if a function is "monadic" for our state monad
 isStateMonadFn :: Maybe Type.CanonicalType -> Bool
-isStateMonadFn (Just ty) =  case (functionFinalReturnType ty) of
+isStateMonadFn (Just ty) =  trace ("Checking monad fn " ++ show ty) $ case (functionFinalReturnType ty) of
   (Type.App tyCon _) -> tyCon == stateMonadTycon
   _ -> False
-isStateMonadFn _ = False
+isStateMonadFn _ = trace "monad Nothing Type" $ False
 
 --Given a monadic function, sequence it into a series of "statements"
 --Based on the `andThen` bind operator, used in infix position
-sequenceMonadic :: LabeledExpr -> (LabeledExpr, [( (Pattern, LabeledExpr), LabeledExpr)])
+sequenceMonadic :: LabeledExpr
+                -> ([(LabeledExpr, (Pattern,LabeledExpr))]
+                    , LabeledExpr)
 sequenceMonadic e@(A _ (Binop op e1 (A _ (Lambda pat body)) )) = case (Var.name op) of
   "andThen" -> let
-      (bodyHead,bodySeq) = sequenceMonadic body
-    in (e1, ( (pat, e ), bodyHead):bodySeq)
-  _ -> (e,[])
-sequenceMonadic e = (e,[])
+      (bodySeq,bodyTail) = sequenceMonadic body
+      newSeq = [(e1, (pat,e))] ++ bodySeq
+    in ( newSeq, bodyTail)
+  _ -> ([],e)
+sequenceMonadic e = ([],e)
 
 --TODO make TailRecursive
 
@@ -496,14 +507,15 @@ tyArity _ = 0
 argsGiven :: LabeledExpr -> Maybe [LabeledExpr]
 argsGiven (A _ e) = case e of
   Var v -> Just []
-  (App f e ) -> ([e]++) `fmap` argsGiven f
+  (App f e ) -> (++[e]) `fmap` argsGiven f
   _ -> trace "Error for args given" $ Nothing
 
+--TODO qualify?
 specialFnNames = Set.fromList ["newRef", "deRef", "writeRef", "runState"]
 
 --TODO add module?
 isSpecialFn :: Var -> Bool
-isSpecialFn v = trace ("!!!! Is Special?" ++ (show $ Var.name v) ) False -- $ Set.member (Var.name v) specialFnNames   
+isSpecialFn v = trace ("!!!! Is Special?" ++ (show $ Var.name v) ) $ Set.member (Var.name v) specialFnNames   
 
 specialFnEdges
   :: Map.Map Var FunctionInfo
@@ -528,10 +540,10 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
        e]
     "deRef" -> case (head argList) of
         (A _ (Var ref)) -> return $ [AssignParam (IntermedExpr $ getLabel e) (Ref ref) e]
-        _ -> trace "Error for Special edges" $ error "SE1" -- $Nothing
+        _ -> trace ("Error for special edges deRef" ++ show argList ) $ Nothing
     "writeRef" -> case (head argList) of
         (A _ (Var ref)) -> return $ [Assign (Ref ref) e]
-        _ -> trace "Error for special edges" error "SE2"-- $ Nothing
+        _ -> trace ("Error for special edges writeRef" ++ show argList ) Nothing
     "runState" -> case argList of
       [A _ (Var e)] -> error "TODO runState"
       [A _ (App e1 _)] -> do

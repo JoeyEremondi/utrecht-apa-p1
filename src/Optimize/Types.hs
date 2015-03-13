@@ -9,6 +9,9 @@ import qualified AST.Annotation as Annotate
 import qualified AST.Variable as Var
 import qualified Data.Map as Map
 import qualified Elm.Compiler.Module as PublicModule
+import Text.PrettyPrint as P 
+
+import AST.PrettyPrint
 
 
 --Generic place to put types and definitions
@@ -46,7 +49,16 @@ data GenericDef a v = GenericDef {
   defPat :: Pattern,
   defBody :: (Expr a (GenericDef a v) v),
   defType:: (Maybe CanonicalType) }
-                
+
+instance Pretty LabelDef where
+  pretty (GenericDef pattern expr maybeTipe) =
+      P.vcat [ annotation, definition ]
+      where
+        definition = pretty pattern <+> P.equals <+> pretty expr
+        annotation = case maybeTipe of
+                       Nothing -> P.empty
+                       Just tipe -> pretty pattern <+> P.colon <+> pretty tipe
+                      
 type LabelDef = GenericDef (Region, Label, Env Label) Var
 
 deriving instance Show LabelDef

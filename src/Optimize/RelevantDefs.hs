@@ -20,6 +20,9 @@ import           Optimize.MonotoneFramework
 import           Optimize.EmbellishedMonotone
 import           Optimize.Types
 
+import AST.PrettyPrint (pretty)
+import Text.PrettyPrint.HughesPJ (render)
+
 
 import Optimize.ControlFlow hiding (trace)
 
@@ -54,7 +57,7 @@ getRelevantDefs
   :: Map.Map Var FunctionInfo
   -> LabeledExpr
   -> Maybe (ProgramInfo LabelNode,
-           Map.Map LabelNode (Set.Set (VarPlus, Maybe Label)),
+           Map.Map LabelNode (Set.Set (VarPlus, Label)),
            [LabelNode])
 getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
   let
@@ -82,29 +85,34 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
       let controlEdges = concat $ edgeListList ++ functionEdgeListList 
       let edges = map (\(n1,n2) -> (getLabel `fmap` n1, getLabel `fmap` n2 ) ) controlEdges
       --edges = concat `fmap` edgeListList
-      let allNodes = Set.toList $ Set.fromList $ concat [[x,y] | (x,y) <- edges] --TODO nub?
+      let allNodes = trace ("All CFG edges " ++ show edges) $ Set.toList $ Set.fromList $ concat [[x,y] | (x,y) <- edges] --TODO nub?
       let progInfo =  makeProgramInfo (Set.fromList initialNodes) allNodes edges
       let targetNodes = map (\n -> ProcExit n ) fnLabels
-      trace ( "All edges " ++ (show (labelPairs progInfo ) ) ) $
-        return (progInfo, allNodes, expDict, targetNodes, fnInfo)
+      return (progInfo, allNodes, expDict, targetNodes, fnInfo)
   in case maybeInfo of
     Nothing -> trace "Failed getting info" $ Nothing
     Just (pinfo, allNodes, expDict, targetNodes, fnInfo) ->
       let
-        reachMap = callGraph eAnn
+        intMap = Map.fromList $ zip allNodes [1..]
+        labelInfo cnode = show  cnode
+        nameMap = Map.mapWithKey
+          (\node _ -> ("Node: " ++ labelInfo node ) ++ "\n\n" ++
+            (render $ pretty $ (expDict `mapGet` ( getNodeLabel node) ) ) )  intMap
+        reachMap = trace ("Call Graph\n\n" ++ (printGraph (intMap `mapGet`) (nameMap `mapGet`) pinfo) ++ "\n\n" ) $
+          callGraph eAnn
         domain = map (\d -> map Call d) $ contextDomain contextDepth reachMap
         freeVars = getFreeVars allNodes
-        iotaVal = Set.fromList [ (x, Nothing) | x <- freeVars]
+        iotaVal = Set.fromList [] --TODO put back? -- [ (x, Nothing) | x <- freeVars]
         ourLat = embellishedRD domain  iotaVal
         --ourLat = reachingDefsLat iotaVal
         --(_, theDefsHat) = minFP ourLat transferFun pinfo
         (_, theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
-        theDefs = trace ("\ngot fp defs" ++ show theDefsHat ) $ Map.map (\(EmbPayload (_, lhat)) -> lhat []) theDefsHat
+        theDefs = Map.map (\(EmbPayload (_, lhat)) -> lhat []) theDefsHat
         --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
-        relevantDefs = Map.mapWithKey
+        relevantDefs = trace ("\n\nTheDefs \n\n" ++ (show theDefs) ++ "\n\n\n" ) $ Map.mapWithKey
                        (\x (ReachingDefs s) ->
                          Set.filter (isExprRef fnInfo expDict x) s) theDefs
-      in trace ("TheDefs " ++ show theDefs )$ Just (pinfo, relevantDefs, targetNodes)
+      in trace ("\n\nRelevant Defs \n\n" ++ show relevantDefs )$ Just (pinfo, relevantDefs, targetNodes)
 
 instance Show (ProgramInfo LabelNode) where
   show (ProgramInfo { edgeMap = pinfo_edgeMap,
@@ -117,15 +125,15 @@ isExprRef
   :: Map.Map Var FunctionInfo
   -> Map.Map Label LabeledExpr
   -> LabelNode
-  -> (VarPlus, Maybe Label )
+  -> (VarPlus, Label )
   -> Bool
-isExprRef fnInfo exprs lnode (vplus, Just _) = let
+isExprRef fnInfo exprs lnode (vplus,  _) = let
     e = case (exprs `mapGet` (getNodeLabel lnode)) of
       (A _ (Let defs body)) -> body --We only look for refs in the body of a let
       ex -> ex
   in case vplus of
       ExternalParam _ v -> expContainsVar e v
-      Ref v -> expContainsVar e v
+      Ref v -> expContainsVar e v --TODO special case for assign?
       NormalVar v _defLabel -> expContainsVar e v 
       IntermedExpr l ->  expContainsLabel e l
       FormalReturn v ->
@@ -150,7 +158,7 @@ makeProgramInfo initialNodes allLabels edgeList = let
     isExtremal = (`Set.member` initialNodes)
   in ProgramInfo edgeFn allLabels edgeList isExtremal
 
-type RDef = (VarPlus, Maybe Label) 
+type RDef = (VarPlus, Label) 
 
 newtype ReachingDefs = ReachingDefs (Set.Set RDef)
                       deriving (Eq, Ord, Show)
@@ -161,7 +169,7 @@ reachingDefsLat iotaVal =  Lattice {
   latticeBottom = ReachingDefs (Set.empty),
   latticeJoin  = (\(ReachingDefs l1) ((ReachingDefs l2)) ->
     ReachingDefs (l1 `Set.union` l2)),
-  iota = ReachingDefs iotaVal,
+  iota = ReachingDefs (Set.empty), --TODO is this okay? --ReachingDefs iotaVal,
   lleq = \(ReachingDefs l1) (ReachingDefs l2) ->
     l1 `Set.isSubsetOf` l2,
   flowDirection = ForwardAnalysis --TODO forward or back?
@@ -181,9 +189,9 @@ removeKills _ aIn = aIn
 --TODO special case for return in ref-set
 
 gens :: LabelNode -> Set.Set RDef
-gens (Assign var label) = Set.singleton (var, Just label)
-gens (AssignParam var _ label) = Set.singleton (var, Just label)
-gens (ExternalCall v _) = Set.singleton (FormalReturn v, Nothing) --TODO what label?
+gens (Assign var label) = Set.singleton (var, label)
+gens (AssignParam var _ label) = Set.singleton (var, label)
+gens (ExternalCall v _) = Set.singleton (FormalReturn v, Label 0) --TODO what label?
 gens _ = Set.empty
 
 
