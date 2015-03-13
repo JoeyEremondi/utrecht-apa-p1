@@ -141,6 +141,7 @@ oneLevelEdges
     ,[ControlEdge]) ]
   -> Maybe (
      Map.Map Label [ControlNode]
+
     ,Map.Map Label [ControlNode]--Entry and exit node for sub exps
     --,[ControlNode]
     ,[ControlEdge])
@@ -212,9 +213,26 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
             --If function is locally defined, or not fully instantiated, we fail
     Lambda _ _ -> trace "!!!Lambda def" $  Nothing
     Binop op e1 e2 -> case (isArith op) of
-      True -> return (Map.insert (getLabel e) (headMap `mapGet` (getLabel e1)) headMap
-                        , Map.insert (getLabel e) (tailMap `mapGet` (getLabel e2)) headMap
-                          ,subEdges ) --Arithmetic doesn't need its own statements, since we can do inline
+      True -> case (headMaps) of --If arithmetic, treat like a normal expression, doesn't change control flow
+         [] -> (trace "Leaf case" ) $ do
+        
+           let ourHead = [ExprEval e]
+           let ourTail = ourHead
+           return (Map.insert (getLabel e) ourHead headMap,
+                   Map.insert (getLabel e) ourTail tailMap,
+                   subEdges) --Means we are a leaf node, no sub-expressions
+         _ ->  (trace "In fallthrough version of getEdges" ) $ do
+           --TODO need each sub-exp?
+           let subExprs = (directSubExprs e) :: [LabeledExpr]
+           let subHeads = trace ("Sub Expressions: " ++ show subExprs ) $ map (\ex -> headMap `mapGet` (getLabel ex)) subExprs
+           let subTails = map (\ex -> tailMap `mapGet` (getLabel ex)) subExprs
+           let ourHead = trace ("Sub heads " ++ show subHeads ++ "\nsub tails " ++ show subTails) $ head subHeads
+           let ourTail = trace ("Sub edges " ++ show subEdges ) $ last subTails
+           let subExpEdges = concatMap connectLists $ zip (init subTails) (tail subHeads)
+           return (Map.insert (getLabel e) ourHead headMap
+                 , Map.insert (getLabel e) ourTail tailMap
+                  --, subNodes
+                  , subEdges ++ subExpEdges)  --Arithmetic doesn't need its own statements, since we can do inline
       False -> oneLevelEdges fnInfo (binOpToFn e) maybeSubInfo
     --Data _ args -> paramNodes args --Ctor is a constant, so just evaluate the arguments
     MultiIf condCasePairs -> do
@@ -311,22 +329,24 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
 
     _ -> (trace "Fallthrough" ) $ case (headMaps) of
       [] -> (trace "Leaf case" ) $ do
+        
         let ourHead = [ExprEval e]
         let ourTail = ourHead
         return (Map.insert (getLabel e) ourHead headMap,
                 Map.insert (getLabel e) ourTail tailMap,
                 subEdges) --Means we are a leaf node, no sub-expressions
-      _ -> (trace "In fallthrough version of getEdges" ) $ do
-        let headLists = Map.elems headMap
-        let tailLists = Map.elems tailMap
-        let (ourHead:otherHeads) = headLists
-        let otherTails = init tailLists
-        let ourTail = last tailLists
-        let subExpEdges = concatMap connectLists $ zip otherTails otherHeads
+      _ ->  (trace "In fallthrough version of getEdges" ) $ do
+        --TODO need each sub-exp?
+        let subExprs = (directSubExprs e) :: [LabeledExpr]
+        let subHeads = trace ("Sub Expressions: " ++ show subExprs ) $ map (\ex -> headMap `mapGet` (getLabel ex)) subExprs
+        let subTails = map (\ex -> tailMap `mapGet` (getLabel ex)) subExprs
+        let ourHead = trace ("Sub heads " ++ show subHeads ++ "\nsub tails " ++ show subTails) $ head subHeads
+        let ourTail = trace ("Sub edges " ++ show subEdges ) $ last subTails
+        let subExpEdges = concatMap connectLists $ zip (init subTails) (tail subHeads)
         return (Map.insert (getLabel e) ourHead headMap
               , Map.insert (getLabel e) ourTail tailMap
                --, subNodes
-               , subEdges ++ subExpEdges)
+               , subEdges ++ subExpEdges) 
         --Other cases don't generate control nodes for one-level analysis
         --For control flow, we just calculate each sub-expression in sequence
         --We connect the end nodes of each sub-expression to the first of the next
@@ -381,7 +401,7 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
                         (IntermedExpr $ getLabel body) body]
   let assignParams =
         [(AssignParam (FormalParam pat label) (NormalVar v argLab) body) |
-           (pat,argLab) <- argPatLabels, v <- argVars]
+           (pat,argLab) <- argPatLabels, v <- getPatternVars pat]
   let startEdges = [(ourHead, head assignParams )]
   let assignFormalEdges = zip (init assignParams) (tail assignParams)
   let assignReturnEdges = connectLists (tailNodes, assignReturns)

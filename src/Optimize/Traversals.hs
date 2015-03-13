@@ -310,3 +310,11 @@ tformModE cf c fns e = case e of
   _ -> e
 
 tformModEverywhere f e = tformModE (\_ _ -> repeat ()) () (cid, cid, cid, \_ -> f) e
+
+directSubExprs :: LabeledExpr -> [LabeledExpr]
+directSubExprs e = snd $ foldE
+                 (\_ () -> repeat ())
+                 ()
+                 (\(GenericDef _ e v) -> [e])
+                 (\_ e subs -> (e,map fst subs) ) e
+
