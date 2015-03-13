@@ -273,14 +273,22 @@ expContainsLabel e lin =
   (\ _ (A (_,lExp,_) _) subContains ->
     (or subContains) || (lExp == lin ) ) e
 
+--We need a dummy value for calls that are not in scope
+externalCallLabel :: Label
+externalCallLabel = Label (-9999)
+
+externalCallAnn = (error "Should never access external call region",
+                          externalCallLabel,
+                          error "Should never access external call env")
+
 labelDict :: LabeledExpr -> Map.Map Label LabeledExpr
-labelDict =
+labelDict e = Map.insert externalCallLabel (A externalCallAnn $ Record []) $
   foldE
   (\ _ () -> repeat ())
   ()
   (\(GenericDef _ e v) -> [e])
   (\ _ e@(A (_,lExp,_) _) subDicts ->
-    Map.insert lExp e $ Map.unions subDicts)
+    Map.insert lExp e $ Map.unions subDicts) e
 
 
 defsFromModuleExpr :: LabeledExpr -> [LabelDef]

@@ -119,10 +119,8 @@ callGraph (A _ (Let defs _)) =
     callMap = Map.fromList $ zip fnLabels $ map (\body -> allCalls body) fnBodies
   in callMap
 
-contextDomain :: Int -> Map.Map Label [Label] -> [[Label]]
-contextDomain n callMap = let
-    allLabels = Map.keys callMap
-  in helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
+contextDomain :: [Label] -> Int -> Map.Map Label [Label] -> [[Label]]
+contextDomain allLabels n callMap = helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
   where
     helper 0 _ _ = [[]]
     helper 1 _ accum = accum

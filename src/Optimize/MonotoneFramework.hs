@@ -31,9 +31,9 @@ import           Optimize.Types
 
 import           Data.Text.Lazy                    (pack, unpack)
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 --TODO remove
-trace _ x = x
+--trace _ x = x
 
 --Wrapper for a control flow graph
 --newtype CFG block = CFG (Set.Set (block, block))

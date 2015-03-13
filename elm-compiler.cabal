@@ -243,7 +243,9 @@ Test-Suite compiler-tests
         transformers >= 0.2 && < 0.5,
         union-find >= 0.2 && < 0.3,
         unordered-containers >= 0.1 && < 0.3,
-        elm-core-sources
+        elm-core-sources,
+        fgl,
+        graphviz 
 
 
 Test-Suite apa-tests
@@ -263,7 +265,7 @@ Test-Suite apa-tests
       -O2
       -threaded
       -fprof-auto
-      "-with-rtsopts=-N -p -s -h -i0.1"
+      "-with-rtsopts=-N -p -s -h -i0.1 -sstderr"
 
     build-depends:
         test-framework > 0.8 && < 0.9,
@@ -295,4 +297,6 @@ Test-Suite apa-tests
         transformers >= 0.2 && < 0.5,
         union-find >= 0.2 && < 0.3,
         unordered-containers >= 0.1 && < 0.3,
-        elm-core-sources
+        elm-core-sources,
+        fgl,
+        graphviz 

@@ -180,10 +180,12 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
               let firstHead = (headMap `mapGet` (getLabel $ head argList))
               let otherHeads = map (\arg -> headMap `mapGet` (getLabel $ arg) ) $ tail argList
               let tailLists = map (\arg -> tailMap `mapGet` (getLabel $ arg) )  argList
-              --let (otherTails, lastTail) = (init tailLists, last tailLists)
-              let assignParamEdges = concatMap connectLists $ zip tailLists argNodes
-              let calcNextParamEdges = concatMap connectLists $ zip (init argNodes) otherHeads
-              let gotoFormalEdges = connectLists ((last argNodes), [head assignFormalNodes])
+              let (assignParamEdges, calcNextParamEdges, gotoFormalEdges) =
+                    case argList of
+                      [] -> error "Fn Call with no argument"
+                      _ -> (concatMap connectLists $ zip tailLists argNodes,
+                           concatMap connectLists $ zip (init argNodes) otherHeads,
+                           connectLists ((last argNodes), [head assignFormalNodes]))
 
               let assignFormalEdges = zip (init assignFormalNodes) (tail assignFormalNodes)
               let callEdges = [(last assignFormalNodes, callNode ),
@@ -402,11 +404,15 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   let assignParams =
         [(AssignParam (FormalParam pat label) (NormalVar v argLab) body) |
            (pat,argLab) <- argPatLabels, v <- getPatternVars pat]
-  let startEdges = [(ourHead, head assignParams )]
-  let assignFormalEdges = zip (init assignParams) (tail assignParams)
+  let (startEdges, assignFormalEdges, gotoBodyEdges) =
+        case argPats of
+          [] -> (connectLists([ourHead], headMap `mapGet` (getLabel body)),
+                [], [])
+          _ -> ([(ourHead, head assignParams )],
+              zip (init assignParams) (tail assignParams),
+              connectLists ([last assignParams], headMap `mapGet` (getLabel body)))
   let assignReturnEdges = connectLists (tailNodes, assignReturns)
   let fnExitEdges = connectLists (assignReturns, ourTail)
-  let gotoBodyEdges = connectLists ([last assignParams], headMap `mapGet` (getLabel body))
 
   return $ startEdges ++ assignFormalEdges ++ assignReturnEdges ++ fnExitEdges ++ gotoBodyEdges
 

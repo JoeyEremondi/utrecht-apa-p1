@@ -1,39 +1,42 @@
-{-# LANGUAGE DeriveFunctor, UndecidableInstances, FlexibleInstances, StandaloneDeriving #-}
+{-# LANGUAGE DeriveFunctor        #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE StandaloneDeriving   #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Optimize.RelevantDefs (getRelevantDefs) where
 
-import           AST.Annotation             (Annotated (..))
+import           AST.Annotation               (Annotated (..))
 --import qualified AST.Expression.Canonical   as Canon
 import           AST.Expression.General
-import qualified AST.Module                 as Module
-import qualified AST.Pattern                as Pattern
-import qualified AST.Variable as Variable
+import qualified AST.Module                   as Module
+import qualified AST.Pattern                  as Pattern
+import qualified AST.Variable                 as Variable
 import           Control.Monad
-import qualified Data.List                  as List
-import qualified Data.Map                   as Map hiding ((!))
-import qualified Data.Set                   as Set
+import qualified Data.List                    as List
+import qualified Data.Map                     as Map hiding ((!))
+import qualified Data.Set                     as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
 
 
+import           Optimize.EmbellishedMonotone
 import           Optimize.Environment
 import           Optimize.MonotoneFramework
-import           Optimize.EmbellishedMonotone
 import           Optimize.Types
 
-import AST.PrettyPrint (pretty)
-import Text.PrettyPrint.HughesPJ (render)
+import           AST.PrettyPrint              (pretty)
+import           Text.PrettyPrint.HughesPJ    (render)
 
 
-import Optimize.ControlFlow hiding (trace)
+import           Optimize.ControlFlow         hiding (trace)
 
-import Debug.Trace (trace)
+import           Debug.Trace                  (trace)
 --trace _ x = x
 
 --How long do we let our call strings be?
-contextDepth = 2
+contextDepth = 1
 
 insertAll :: Ord k => [(k,a)] -> Map.Map k a -> Map.Map k a
-insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs  
+insertAll pairs theMap = foldr (\(k,a) m -> Map.insert k a m) theMap pairs
 
 
 
@@ -49,10 +52,10 @@ getFreeVars nodes = let
       ) Set.empty nodes
   in  freeVars
 
-    
 
 
---Give the list of definitions  
+
+--Give the list of definitions
 getRelevantDefs
   :: Map.Map Var FunctionInfo
   -> LabeledExpr
@@ -72,7 +75,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
               Map.insert (nameToCanonVar n)
               (FunctionInfo
                (getArity fnDef)
-               (map (\pat -> FormalParam pat (getLabel fnDef) ) (functionArgPats fnDef)) 
+               (map (\pat -> FormalParam pat (getLabel fnDef) ) (functionArgPats fnDef))
                (ProcEntry fnDef)
                (ProcExit fnDef)
                (Just $ getLabel fnDef)
@@ -82,16 +85,16 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
       let tailDict = Map.unions tailDicts
       functionEdgeListList <- forM defs (functionDefEdges (headDict, tailDict))
       let initialNodes = [ProcEntry (getLabel body)| (GenericDef (Pattern.Var n) body _ ) <- defs ]
-      let controlEdges = concat $ edgeListList ++ functionEdgeListList 
+      let controlEdges = concat $ edgeListList ++ functionEdgeListList
       let edges = map (\(n1,n2) -> (getLabel `fmap` n1, getLabel `fmap` n2 ) ) controlEdges
       --edges = concat `fmap` edgeListList
-      let allNodes = trace ("All CFG edges " ++ show edges) $ Set.toList $ Set.fromList $ concat [[x,y] | (x,y) <- edges] --TODO nub?
+      let allNodes =  Set.toList $ Set.fromList $ concat [[x,y] | (x,y) <- edges] --TODO nub?
       let progInfo =  makeProgramInfo (Set.fromList initialNodes) allNodes edges
       let targetNodes = map (\n -> ProcExit n ) fnLabels
-      return (progInfo, allNodes, expDict, targetNodes, fnInfo)
+      return (progInfo, allNodes, expDict, targetNodes, fnInfo, fnLabels)
   in case maybeInfo of
     Nothing -> trace "Failed getting info" $ Nothing
-    Just (pinfo, allNodes, expDict, targetNodes, fnInfo) ->
+    Just (pinfo, allNodes, expDict, targetNodes, fnInfo, fnLabels) ->
       let
         intMap = Map.fromList $ zip allNodes [1..]
         labelInfo cnode = show  cnode
@@ -100,7 +103,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
             (render $ pretty $ (expDict `mapGet` ( getNodeLabel node) ) ) )  intMap
         reachMap = trace ("Call Graph\n\n" ++ (printGraph (intMap `mapGet`) (nameMap `mapGet`) pinfo) ++ "\n\n" ) $
           callGraph eAnn
-        domain = map (\d -> map Call d) $ contextDomain contextDepth reachMap
+        domain = map (\d -> map Call d) $ contextDomain fnLabels contextDepth reachMap
         freeVars = getFreeVars allNodes
         iotaVal = Set.fromList [] --TODO put back? -- [ (x, Nothing) | x <- freeVars]
         ourLat = embellishedRD domain  iotaVal
@@ -134,7 +137,7 @@ isExprRef fnInfo exprs lnode (vplus,  _) = let
   in case vplus of
       ExternalParam _ v -> expContainsVar e v
       Ref v -> expContainsVar e v --TODO special case for assign?
-      NormalVar v _defLabel -> expContainsVar e v 
+      NormalVar v _defLabel -> expContainsVar e v
       IntermedExpr l ->  expContainsLabel e l
       FormalReturn v ->
         --check if we reference the function called --TODO more advanced?
@@ -142,7 +145,7 @@ isExprRef fnInfo exprs lnode (vplus,  _) = let
           (ProcExit l1, Just ( Just l2)) -> l1 == l2
           (Return v2 _, _ ) -> v == v2
           _ -> False
-        
+
       ActualParam l -> expContainsLabel e l
       FormalParam pat _ -> or $ map (expContainsVar e) $ getPatternVars pat
 isExprRef _ _ _ _ = False --If not in "Just" form, we ignore, since is uninitialized variable
@@ -158,20 +161,23 @@ makeProgramInfo initialNodes allLabels edgeList = let
     isExtremal = (`Set.member` initialNodes)
   in ProgramInfo edgeFn allLabels edgeList isExtremal
 
-type RDef = (VarPlus, Label) 
+type RDef = (VarPlus, Label)
 
 newtype ReachingDefs = ReachingDefs (Set.Set RDef)
                       deriving (Eq, Ord, Show)
 
 --TODO check this
 reachingDefsLat :: Set.Set RDef -> Lattice ReachingDefs
-reachingDefsLat iotaVal =  Lattice {
+reachingDefsLat iotaVal =
+  let
+    rdefJoin (ReachingDefs l1) (ReachingDefs l2) = ReachingDefs (l1 `Set.union` l2)
+    rdefLleq (ReachingDefs l1) (ReachingDefs l2) = l1 `Set.isSubsetOf` l2
+
+  in Lattice {
   latticeBottom = ReachingDefs (Set.empty),
-  latticeJoin  = (\(ReachingDefs l1) ((ReachingDefs l2)) ->
-    ReachingDefs (l1 `Set.union` l2)),
+  latticeJoin  = rdefJoin,
   iota = ReachingDefs (Set.empty), --TODO is this okay? --ReachingDefs iotaVal,
-  lleq = \(ReachingDefs l1) (ReachingDefs l2) ->
-    l1 `Set.isSubsetOf` l2,
+  lleq = rdefLleq,
   flowDirection = ForwardAnalysis --TODO forward or back?
   }
 
@@ -219,7 +225,7 @@ embellishedRD domain iotaVal  =
 returnTransfer :: (LabelNode, LabelNode) -> (ReachingDefs, ReachingDefs) -> ReachingDefs
 returnTransfer (lc, lr) (ReachingDefs aCall, ReachingDefs  aRet ) =
   ReachingDefs $ (removeKills lr (removeKills lc (aCall `Set.union` aRet )))
-    `Set.union` (gens lc) `Set.union` (gens lr) 
+    `Set.union` (gens lc) `Set.union` (gens lr)
 
 liftedTransfer
   :: Set.Set RDef
