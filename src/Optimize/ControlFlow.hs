@@ -276,7 +276,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       --Those assignments correspond to the expressions in tail-position of the case
       let cases = map snd patCasePairs
       
-      let assignCaseValueNodes =  map (\caseBody -> Assign (IntermedExpr $ getLabel e) caseBody ) cases
+      let assignCaseValueNodes =  map (\caseBody -> [Assign (IntermedExpr $ getLabel e) caseBody] ) cases
 
       let branchNode = Branch e
       --let ourHead = case (headMap `mapGet` (getLabel caseExpr)) of
@@ -285,17 +285,17 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let ourHead = headMap IntMap.! (getLabel caseExpr)
 
       let caseHeadNodes = concatMap (\cs -> headMap IntMap.! (getLabel cs) ) cases
-      let caseTailNodes = concatMap (\caseBody -> tailMap IntMap.! (getLabel caseBody) ) cases
+      let caseTailNodes = map (\caseBody -> tailMap IntMap.! (getLabel caseBody) ) cases
       let exprToBranchEdges =
             connectLists (tailMap IntMap.! (getLabel caseExpr), [branchNode])
       let branchToCaseEdges =  connectLists ([branchNode], caseHeadNodes)
 
-      let toAssignEdges = connectLists (caseTailNodes, assignCaseValueNodes)
+      let toAssignEdges = concatMap connectLists $ zip caseTailNodes assignCaseValueNodes
       
 
       return $ (IntMap.insert (getLabel e) ourHead headMap
          --Last thing is assignment for whichever case we took
-        ,IntMap.insert (getLabel e) assignCaseValueNodes tailMap 
+                ,IntMap.insert (getLabel e) (concat assignCaseValueNodes) tailMap 
         --,[Assign (IntermedExpr $ getLabel caseExpr) caseExpr] ++ caseNodes ++ subNodes
          ,subEdges ++ exprToBranchEdges ++ branchToCaseEdges ++ toAssignEdges)
     Let defs body -> do
