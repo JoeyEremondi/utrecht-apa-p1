@@ -3,11 +3,10 @@
 module Optimize.ControlFlow  where
 
 import           AST.Annotation             (Annotated (..))
-import qualified AST.Expression.Canonical   as Canon
+
 import           AST.Expression.General
 import qualified AST.Module                 as Module
 import qualified AST.Pattern                as Pattern
-import           AST.Variable               (Home (..), home)
 import qualified AST.Variable               as Var
 import           Control.Monad
 import qualified Data.List                  as List
@@ -15,11 +14,8 @@ import qualified Data.Map                   as Map hiding ((!))
 import qualified Data.Set                   as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
-
 import qualified AST.Variable               as Variable
-
 import           Optimize.Environment
-import           Optimize.MonotoneFramework
 import           Optimize.Types
 
 import qualified Elm.Compiler.Module        as PublicModule
@@ -32,7 +28,7 @@ import Data.Hashable
 import           Debug.Trace                (trace)
 --trace _ x = x
 
---Type for variables or some "special cases"
+-- | Type for variables or some "special cases"
 data VarPlus =
   NormalVar Var Label
   | IntermedExpr Label
@@ -43,31 +39,35 @@ data VarPlus =
   | ExternalParam Int Var
     deriving (Eq, Ord, Show)
 
---TODO how to make sure all our IntermedExprs are there?
-
---Our different types of control nodes
+-- | Nodes for different types of statements in our control flow graph
+-- | We leave the "expression" type generic, for whether we store the expression itself,
+-- | Or just its label
 data ControlNode' expr =
   Branch (expr)
   | Assign VarPlus (expr)
-  | AssignParam VarPlus VarPlus (expr)
+    --Used for special cases where we assign to internal values, like params or return value
+  | AssignParam VarPlus VarPlus (expr) 
   | Call (expr)
-  | Return Var (expr) --TODO assign to what?
+  | Return Var (expr)
   | ProcEntry (expr)
   | ProcExit (expr)
   | ExprEval (expr)
   | ExternalCall Var [VarPlus]
   | ExternalStateCall Var [VarPlus]
-  -- | GlobalEntry --Always the first node
-  -- | GlobalExit --Always the last node
     deriving (Functor, Eq, Ord, Show)
 
+-- | We use this to store nodes in a HashMap, hopefully
+-- | to get some speed increases
 instance Hashable ControlNode where
   hashWithSalt _ n = getNodeLabel $ fmap (getLabel) n
 
+-- | We use this to store nodes in a HashMap, hopefully
+-- | to get some speed increases
 instance Hashable LabelNode where
   hashWithSalt _ = getNodeLabel
 
-
+-- | Given a node, return the label of the expression represented by that node
+-- | or a "special" label if it represents an external function
 getNodeLabel :: ControlNode' Label -> Label
 getNodeLabel (Branch n) = n
 getNodeLabel (ExternalCall _ _) = externalCallLabel
@@ -81,12 +81,16 @@ getNodeLabel (ProcEntry n) = n
 getNodeLabel (ProcExit n) = n
 --getNodeLabel _ = Label 0
 
-
+-- Just Map.!, but printing useful info if the item is not in the map
 mapGet :: (Ord k, Show k, Show a) => Map.Map k a -> k -> a
 mapGet m k = case Map.lookup k m of
   Nothing -> error $ "Couldn't find key " ++ (show k) ++ " in map " ++ (show $ Map.toList m )
   Just e -> e
 
+{-|
+Information about each function defined in a module.
+We need to know this before we construct our control-flow graph.
+|-}
 data FunctionInfo =
   FunctionInfo
   {
@@ -105,29 +109,29 @@ type ControlEdge = (ControlNode, ControlNode)
 
 
 
---getLabel :: LabeledExpr -> Label
---getLabel (A (_,l,_) _) = l
-
-
---For a fuction parameter, we treat each tail-position expression in the parameter
---As an assignment to the actual value of that parameter
+-- | For a fuction parameter, we treat each tail-position expression in the parameter
+-- | As an assignment to the actual value of that parameter
 paramNodes :: [LabeledExpr] -> [[ControlNode]]
 paramNodes = map (\ arg ->
                          map (\tailExpr ->
                            Assign (ActualParam $ getLabel arg) tailExpr ) $ tailExprs arg)
 
-
+-- | Get the expressions in "tail" position of an expression
+-- | These can be viewed as assignments to the value of the expression
 tailExprs :: LabeledExpr -> [LabeledExpr]
 tailExprs wholeExp@(A _ e) = tailExprs' e
   where
     tailExprs' (MultiIf guardBodies) = concatMap tailExprs $ map snd guardBodies
-    tailExprs' (Case e cases) = concatMap tailExprs $ map snd cases
-    tailExprs' (Let defs body) = tailExprs body
-    tailExprs' e = [wholeExp] --All other cases, the expression itself is the returned value, no control flow
+    tailExprs' (Case _ cases) = concatMap tailExprs $ map snd cases
+    tailExprs' (Let _ body) = tailExprs body
+    tailExprs' _ = [wholeExp] --All other cases, the expression itself is the returned value, no control flow
 
+-- | Given a tail position expression, generate the control node
+-- | Representing its assigning a value to the expression
 tailAssign :: Label ->  LabeledExpr -> ControlNode
 tailAssign label tailExpr = Assign (IntermedExpr label) tailExpr
 
+-- | Convert a bin-op to a function call, since the difference is only syntactic
 binOpToFn :: LabeledExpr -> LabeledExpr
 binOpToFn (A ann (Binop op e1 e2)) =
   let
@@ -135,13 +139,18 @@ binOpToFn (A ann (Binop op e1 e2)) =
     firstFun = A ann $ App opFn e1
   in A ann $ App firstFun e2
 
+-- | Given two lists of control nodes, add an edge from each node in the first list
+-- | to each node on the second list
 connectLists :: ([ControlNode], [ControlNode]) -> [ControlEdge]
 connectLists (l1, l2) = [(n1, n2) | n1 <- l1, n2 <- l2]
 
 
 
---Used in a foldE to generate statements/control nodes for expressions that need one
---Later we'll go in and add control edges
+-- | Given an expression, generate the control-flow graph edges from that expression
+-- | Without recursing deeper into the expression
+-- | We use a dictionary mapping expressions to their "head" and "tail control nodes,
+-- | i.e. lists of control nodes that represent entry into evaluating an expression,
+-- | and ones that can be the exit-points for evaluating an expression
 oneLevelEdges
   :: Map.Map Var FunctionInfo
   -> LabeledExpr
@@ -364,7 +373,12 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
         --For control flow, we just calculate each sub-expression in sequence
         --We connect the end nodes of each sub-expression to the first of the next
 
+--TODO doc each case
 
+{-|
+Given a top-level definition, traverse the expression for that definition
+and return all control-flow edges defined by it.
+|-}
 allDefEdges
   :: Map.Map Var FunctionInfo
   -> LabelDef
@@ -377,6 +391,10 @@ allDefEdges fnInfo d@(GenericDef pat body ty) =
   then monadicDefEdges fnInfo d
   else allExprEdges fnInfo $ functionBody body
 
+{-|
+Given an expression, traverse it
+and return all control-flow edges defined by it.
+|-}
 allExprEdges
   :: Map.Map Var FunctionInfo
   -> LabeledExpr
@@ -391,9 +409,17 @@ allExprEdges fnInfo e = foldE
            (\ _ e subs-> oneLevelEdges fnInfo e subs)
            e
 
+-- | Convert a string to a canonical local variable
 nameToCanonVar :: String -> Var
 nameToCanonVar name = Variable.Canonical  Variable.Local name
 
+{-|
+Given a function definition, generate the special control flow
+edges representing proc entry and exit, as well as assigning parameters
+and return values.
+We need the map of head and tail nodes so that we can connect our special edges
+to the function body.
+|-}
 functionDefEdges
   :: ( IntMap.IntMap [ControlNode]
     , IntMap.IntMap [ControlNode])
@@ -427,10 +453,12 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
 
   return $ startEdges ++ assignFormalEdges ++ assignReturnEdges ++ fnExitEdges ++ gotoBodyEdges
 
+{-| 
 --Given a monadic expression, break it up into statements
 --And calculate the edges between those statements in our CFG
---TODO self recursion
+--TODO self recursion?
 --TODO nested state monads?
+|-}
 monadicDefEdges
   :: Map.Map Var FunctionInfo
   -> LabelDef
@@ -475,51 +503,67 @@ monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
            finalAssignEdges ++ concat betweenStatementEdges
              ++ concatMap (\(_,_,edges) -> edges) statementNodes)
 
-
+-- | Given the label for an expression on the RHS of a definition, and the pattern of
+-- | that definition, generate the control nodes assigning to all variables defined
+-- | in the definition
 varAssign :: Label -> Pattern -> LabeledExpr -> [ControlNode]
 varAssign defLabel pat e = [Assign (NormalVar pvar defLabel  ) e |
                    pvar <- getPatternVars pat]
 
-
+-- | Given an expression representing a function application, return the expression
+-- | Representing the function to be called, if it can be resolved to a specific name
 functionName :: LabeledExpr -> Maybe Var
 functionName (A _ e) = case e of
   Var v -> Just v
   (App f _ ) -> functionName f
   _ -> trace "Error getting fn name" $ Nothing
 
+-- | Given a function definition, return the expression for the body of that function.
+-- | We deal with multi-parameter functions by recursing into expresions until we find
+-- | a body that isn't a Lambda
 functionBody :: LabeledExpr -> LabeledExpr
 functionBody (A _ (Lambda _ e)) = functionBody e
 functionBody e = e
 
+-- | Given a function definition, return the label of the body of that function
 functionLabel (GenericDef _ body _) = case functionBody body of
   (A (_, label, _) _) -> label
 
+-- | Given a function definition, return all patterns corresponding to
+-- | arguments of that function
 functionArgPats :: LabeledExpr -> [Pattern]
 functionArgPats (A _ (Lambda pat e)) = [pat] ++ (functionArgPats e)
 functionArgPats _ = []
 
+-- | Given a function definition, return the labels of each lambda expresssion
+-- | defining a single argument
 functionArgLabels :: LabeledExpr -> [Label]
 functionArgLabels (A (_,l,_) (Lambda pat e)) = [l] ++ (functionArgLabels e)
 functionArgLabels _ = []
 
---Get the "final" return type of a function type
---i.e. what's returned if it is fully applied
+-- | Get the "final" return type of a function type
+-- | i.e. what's returned if it is fully applied
 functionFinalReturnType :: Type.CanonicalType -> Type.CanonicalType
 functionFinalReturnType t@(Type.Lambda _ ret) = trace ("\nFinal Ret "  ++ show ret) $functionFinalReturnType ret
 functionFinalReturnType t = t
 
---Our special State monad for imperative code
+-- | Our special State monad for imperative code
 stateMonadTycon = Type.Type $ Var.Canonical {Var.home = Var.Module ["State","Escapable"], Var.name = "EState"}
 
---Check if a function is "monadic" for our state monad
+-- | Check if a function type is "monadic" for our state monad
+-- | We take maybe as an argument so that we can pass the type stored in a defintion
 isStateMonadFn :: Maybe Type.CanonicalType -> Bool
 isStateMonadFn (Just ty) =  trace ("Checking monad fn " ++ show ty) $ case (functionFinalReturnType ty) of
   (Type.App tyCon _) -> tyCon == stateMonadTycon
   _ -> False
 isStateMonadFn _ = trace "monad Nothing Type" $ False
 
---Given a monadic function, sequence it into a series of "statements"
---Based on the `andThen` bind operator, used in infix position
+-- | Given a monadic function, sequence it into a series of "statements"
+-- | Based on the `andThen` bind operator, used in infix position
+-- | We return a list of expressions representing statement, paired
+-- | with the pattern and expression that the result of that statement is stored in
+-- | using a monadic bind.
+-- | We also return the last statement, whose value is the result of the monadic computation.
 sequenceMonadic :: LabeledExpr
                 -> ([(LabeledExpr, (Pattern,LabeledExpr))]
                     , LabeledExpr)
@@ -531,16 +575,17 @@ sequenceMonadic e@(A _ (Binop op e1 (A _ (Lambda pat body)) )) = case (Var.name 
   _ -> ([],e)
 sequenceMonadic e = ([],e)
 
---TODO make TailRecursive
-
+-- | Return the number of arguments a function takes by counting its lambdas
 getArity :: LabeledExpr -> Int
 getArity (A _ (Lambda _ e)) = 1 + (getArity e)
 getArity e = 0
 
+-- | Return the number of arguments a function type takes by counting its arrows
 tyArity :: Type.CanonicalType -> Int
 tyArity (Type.Lambda _ e) = 1 + (tyArity e)
 tyArity _ = 0
 
+-- | Given a call expression, determine how many arguments we've supplied to it
 argsGiven :: LabeledExpr -> Maybe [LabeledExpr]
 argsGiven (A _ e) = case e of
   Var v -> Just []
@@ -548,12 +593,16 @@ argsGiven (A _ e) = case e of
   _ -> trace "Error for args given" $ Nothing
 
 --TODO qualify?
+-- | Names of special monadic functions whose actions correspond to special control nodes
+-- | For example, writeRef corresponds to an assignment
 specialFnNames = Set.fromList ["newRef", "deRef", "writeRef", "runState"]
 
 --TODO add module?
+-- | Determine if a function is one of our special monadic names
 isSpecialFn :: Var -> Bool
 isSpecialFn v = trace ("!!!! Is Special?" ++ (show $ Var.name v) ) $ Set.member (Var.name v) specialFnNames
 
+-- | Generate the control flow edges with a call to a special monadic function
 specialFnEdges
   :: Map.Map Var FunctionInfo
   -> (IntMap.IntMap [ControlNode], IntMap.IntMap [ControlNode])
@@ -593,10 +642,13 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
           IntMap.insert (getLabel e) ourTail tailMap,
           assignParamEdges ++ calcNextParamEdges ++ goToTailEdges)
 
-
+-- | Given an operator, return whether it is arithmetic, or if it needs to be
+-- | treated as a function call
 isArith :: Var -> Bool
 isArith = (`elem` arithVars )
 
+-- | The list of binary operators with arithmetic values, who we can treat as instructions
+-- | and not as function calls
 arithVars = [
   Variable.Canonical (Variable.Module ["Basics"]) "+"
   ,Variable.Canonical (Variable.Module ["Basics"]) "-"
@@ -616,7 +668,11 @@ arithVars = [
   ,Variable.Canonical (Variable.Module ["Basics"]) "/="
             ]
 
-
+{-|
+Given the interfaces for modules which have ben imported, whose code we don't have
+access to, look at the definitions and construct the function information
+for all external functions.
+|-}
 interfaceFnInfo :: Map.Map Name PublicModule.Interface -> Map.Map Var FunctionInfo
 interfaceFnInfo interfaces = let
     nameIfaces = Map.toList interfaces

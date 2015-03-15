@@ -1,6 +1,16 @@
 {-# LANGUAGE DeriveFunctor      #-}
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE StandaloneDeriving #-}
+
+
+{-|
+Traversals, transformations and folds for expressions,
+meant to be as generic as possible with regard to their
+annotations and variable types.
+
+The functions here are used to add information to expressions
+that is necessary for optimizing.
+|-}
 module Optimize.Traversals where
 
 import           Optimize.Environment
