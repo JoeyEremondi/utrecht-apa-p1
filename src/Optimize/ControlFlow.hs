@@ -275,57 +275,60 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       --of the case expression
       --Those assignments correspond to the expressions in tail-position of the case
       let cases = map snd patCasePairs
-      let caseTailExprs = concatMap tailExprs cases
-      let caseTails =  map (\tailExpr -> Assign (IntermedExpr $ getLabel e) tailExpr ) caseTailExprs
+      
+      let assignCaseValueNodes =  map (\caseBody -> Assign (IntermedExpr $ getLabel e) caseBody ) cases
 
       let branchNode = Branch e
       --let ourHead = case (headMap `mapGet` (getLabel caseExpr)) of
       --      [] -> [Assign (IntermedExpr $ getLabel caseExpr) caseExpr]
       --      headList -> headList
       let ourHead = headMap IntMap.! (getLabel caseExpr)
-      let ourTail = [Assign (IntermedExpr (getLabel e)) theCase | theCase <- caseTailExprs]
 
-      let caseHeads = concatMap (\cs -> headMap IntMap.! (getLabel cs) ) cases
-      let branchEdges = connectLists (ourHead, [branchNode])
-      let caseEdges =  connectLists ([branchNode], caseHeads)
+      let caseHeadNodes = concatMap (\cs -> headMap IntMap.! (getLabel cs) ) cases
+      let caseTailNodes = concatMap (\caseBody -> tailMap IntMap.! (getLabel caseBody) ) cases
+      let exprToBranchEdges =
+            connectLists (tailMap IntMap.! (getLabel caseExpr), [branchNode])
+      let branchToCaseEdges =  connectLists ([branchNode], caseHeadNodes)
 
-      let endEdges = connectLists (caseTails, ourTail)
+      let toAssignEdges = connectLists (caseTailNodes, assignCaseValueNodes)
+      
 
       return $ (IntMap.insert (getLabel e) ourHead headMap
-        ,IntMap.insert (getLabel e) ourTail tailMap --Last thing is tail statement of whichever case we take
+         --Last thing is assignment for whichever case we took
+        ,IntMap.insert (getLabel e) assignCaseValueNodes tailMap 
         --,[Assign (IntermedExpr $ getLabel caseExpr) caseExpr] ++ caseNodes ++ subNodes
-         ,subEdges ++ caseEdges ++ endEdges ++ branchEdges)
+         ,subEdges ++ exprToBranchEdges ++ branchToCaseEdges ++ toAssignEdges)
     Let defs body -> do
       --We treat the body of a let statement as an assignment to the final value of
       --the let statement
       --Those assignments correspond to the expressions in tail-position of the body
       let orderedDefs = defs --TODO sort these
-      let getDefAssigns (GenericDef pat b _) = trace "DefAssigns" $ concatMap (varAssign label pat) $ tailExprs b
+      --For each def, we make an assignment giving the body's value to each variable
+      let getDefAssigns (GenericDef pat b _) =
+             (varAssign label pat) $ b
       let defAssigns = map getDefAssigns orderedDefs
       --let bodyAssigns = map (tailAssign $ getLabel e) $ tailExprs body
 
-      let (ourHead:otherHeads) = map (\(GenericDef _ b _) -> headMap IntMap.! (getLabel b)) orderedDefs
+      let (ourHead:otherHeads) =
+            map (\(GenericDef _ b _) -> headMap IntMap.! (getLabel b)) orderedDefs
+      let rhsDefTails =
+            map (\(GenericDef _ b _) -> tailMap IntMap.! (getLabel b)) orderedDefs
 
-      let lastDefs = map  (\defList->[last defList] ) defAssigns
-      let firstDefs = map (\defList->[head defList] ) defAssigns
-
-      --let ourHead = case (head allHeads) of
-      --      [] -> head defAssigns
-      --      headList -> headList
-      --let otherHeads = tail allHeads
-      --TODO separate variables?
+      let lastAssignInDefs = map  (\defList->[last defList] ) defAssigns
+      let firstAssignInDefs = map (\defList->[head defList] ) defAssigns
 
       let bodyHead = headMap IntMap.! (getLabel body)
-      let tailLists = map (tailMap IntMap.!) $ map (\(GenericDef _ rhs _) -> getLabel rhs) orderedDefs
 
       let bodyTail = tailMap IntMap.! (getLabel body)
       let ourTail = [Assign (IntermedExpr (getLabel e)) body]
 
+      let defTailToFirstAssignEdges =
+            concatMap connectLists $ zip rhsDefTails firstAssignInDefs
+      let assignWithinDefEdges =
+            concatMap (\assigns -> zip (tail assigns) (init assigns)) defAssigns 
+
       let betweenDefEdges =
-            concatMap connectLists $ zip lastDefs (otherHeads ++ [bodyHead])
-      let tailToDefEdges = concatMap connectLists $ zip tailLists firstDefs
-      let interDefEdges =
-            [(d1, d2) | defList <- defAssigns, d1 <- (init defList), d2 <- (tail defList)]
+            concatMap connectLists $ zip lastAssignInDefs (otherHeads ++ [bodyHead])
       let assignExprEdges = connectLists (bodyTail, ourTail)
 
       --TODO need intermediate?
@@ -334,7 +337,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
                 ,IntMap.insert (getLabel e) ourTail tailMap
                 --,defAssigns ++ bodyAssigns ++ subNodes
                 ,subEdges ++ betweenDefEdges
-                 ++ tailToDefEdges ++ interDefEdges ++ assignExprEdges)
+                 ++ defTailToFirstAssignEdges ++ assignWithinDefEdges ++ assignExprEdges)
 
     _ -> (trace "Fallthrough" ) $ case (headMaps) of
       [] -> leafStatement (headMap, tailMap) subEdges e

@@ -32,6 +32,8 @@ import Data.Hashable
 
 import           Optimize.ControlFlow         hiding (trace)
 
+import System.IO.Unsafe (unsafePerformIO) --TODO remove
+
 import           Debug.Trace                  (trace)
 --trace _ x = x
 
@@ -117,16 +119,20 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
         nameMap = Map.mapWithKey
           (\node _ -> ("Node: " ++ labelInfo node ) ++ "\n\n" ++
             (render $ pretty $ (expDict IntMap.! ( getNodeLabel node) ) ) )  intMap
-        reachMap = 
-          callGraph eAnn
+        callGraphDot = (printGraph (intMap Map.!) (nameMap Map.!) pinfo)
+        !reachMap = trace ("Graph dot\n\n" ++ callGraphDot) $ unsafePerformIO $ do --TODO fix this
+          writeFile "./callGraph.dot" callGraphDot
+          return $ callGraph eAnn
         domain = map (\d -> map Call d) $ contextDomain fnLabels contextDepth reachMap
         --freeVars = getFreeVars allNodes
         !iotaVal = HSet.fromList [] --TODO put back? -- [ (x, Nothing) | x <- freeVars]
+        normalLat = reachingDefsLat iotaVal
         !ourLat = embellishedRD domain  iotaVal
         --ourLat = reachingDefsLat iotaVal
         --(_, theDefsHat) = minFP ourLat transferFun pinfo
         (_, !theDefsHat) = trace "Got MinFP defs" minFP ourLat (liftedTransfer iotaVal) pinfo
-        theDefs = Map.map (\(EmbPayload (_, lhat)) -> lhat []) theDefsHat
+        applyContext (EmbPayload (_,lhat)) = joinAll normalLat $ map (\d -> lhat d ) domain
+        theDefs = Map.map applyContext theDefsHat
         --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = trace ("\n\nTheDefs \n\n" ++ (show theDefs) ++ "\n\n\n" ) $ Map.mapWithKey
                        (\x (ReachingDefs s) ->

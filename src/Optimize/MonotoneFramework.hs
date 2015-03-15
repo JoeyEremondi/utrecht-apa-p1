@@ -30,9 +30,9 @@ import Data.Hashable
 
 import           Data.Text.Lazy                    (pack, unpack)
 
-import Debug.Trace (trace)
+--import Debug.Trace (trace)
 --TODO remove
---trace _ x = x
+trace _ x = x
 
 
 newtype FlowEdge label = FlowEdge (label, label)

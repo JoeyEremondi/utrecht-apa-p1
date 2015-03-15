@@ -158,9 +158,12 @@ sdgProgInfo initFnInfo names eAnn = do
 
 -- | Use function application to get the reached set from an embellished-lattice value
 --TODO all?
-setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
-setFromEmb (EmbPayload (_, lhat)) = unSDG $ lhat []
-
+--setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
+{-
+setFromEmb startDefs (EmbPayload (domain, lhat)) =
+  unSDG $ joinAll normalLat $ map (lhat $) domain
+    where normalLat = forwardSliceLattice startDefs
+-}
 
 {-|
 Given info about imported functions,
@@ -190,7 +193,9 @@ removeDeadCode initFnInfo targetVars e = case dependencyMap of
               (embForwardSliceLat
                  (domain) $ Set.fromList targetNodes)
                (transferFun $ forwardSliceLattice $ Set.fromList targetNodes) pinfo
-      let defMap = Map.map (\(EmbPayload (_, lhat)) -> lhat []) embDefMap
+      let applyContext (EmbPayload (domain, lhat)) =
+            joinAll (forwardSliceLattice (Set.fromList targetNodes)) $ map (lhat $ ) domain
+      let defMap = Map.map applyContext embDefMap
       return $  (defMap, targetNodes)
 
 -- |Given a set of target nodes, a map from nodes to other nodes depending on that node,
