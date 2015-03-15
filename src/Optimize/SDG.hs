@@ -5,8 +5,6 @@ import           AST.Annotation               (Annotated (..))
 import qualified AST.Expression.Canonical     as Canon
 import           AST.Expression.General
 import qualified AST.Module                   as Module
-import qualified AST.Pattern                  as Pattern
-import           Control.Monad
 import qualified Data.List                    as List
 import qualified Data.HashMap.Strict                     as Map
 import qualified Data.Map as NormalMap
@@ -22,7 +20,7 @@ import           Optimize.Types
 
 import qualified AST.Variable                 as Var
 
-import           Optimize.ControlFlow         hiding (trace)
+import           Optimize.ControlFlow
 import           Optimize.EmbellishedMonotone
 import           Optimize.RelevantDefs
 import Data.Hashable
@@ -33,9 +31,14 @@ import qualified Data.HashSet as HSet
 
 import           Debug.Trace                  (trace)
 --trace _ x = x
---How deep we go in our call strings for context
+
+
+-- | How long do we allow our call strings to get?
 contextDepth = 2
 
+-- | Nodes in our system dependence graph
+-- | A node is either a program point, a program point that defines a value,
+-- | Or a special node corresponding to function call/return or entry/exit
 data SDGNode = SDGDef VarPlus Label | SDGLabel Label | SDGFunction LabelNode
   deriving (Eq, Ord, Show)
 
@@ -45,20 +48,29 @@ instance Hashable SDGNode where
     SDGLabel l -> l
     SDGFunction ln -> getNodeLabel ln
 
---The system dependence graph
+-- | The payload of our monotone analysis: the sets of SDG nodes
+-- | Reachable by each given SDG node
+-- | An edge here represents influence
+-- | So if B is dependent on A, (A,B) is an edge in our graph
 newtype SDG = SDG {unSDG :: Set.Set SDGNode}
   deriving (Eq, Ord, Show)
 
-
+-- | Convert our "target" i.e. epxported label node functions into SDG nodes
 makeTargetSet :: Set.Set LabelNode -> Set.Set SDGNode
 makeTargetSet = Set.map toSDG
 
+-- | Convert a Label node into an SDG node
+--TODO function case?
 toSDG :: LabelNode -> SDGNode
 toSDG lnode = case lnode of
   Assign var label -> SDGDef var label
   _ -> SDGLabel $ getNodeLabel lnode
 
-
+-- | The lattice corresponding to forward slicing
+-- | Join is just union
+-- | Our extremal value is the set of "target" nodes, since they are always reachable
+-- | Our analysis is backwards: If B reaches A, and (C,B) is an SDG edge, then C reaches A
+-- | So information flows backwards along SDG edges
 forwardSliceLattice :: Set.Set SDGNode -> Lattice SDG
 forwardSliceLattice startDefs = Lattice {
   --latticeTop :: a
@@ -69,12 +81,12 @@ forwardSliceLattice startDefs = Lattice {
   flowDirection = BackwardAnalysis
   }
 
+-- | The embellished version of our forward-slice lattice
 embForwardSliceLat domain startDefs  =
   liftToEmbellished domain (SDG startDefs) (forwardSliceLattice startDefs)
 
---Our transfer funciton is basically the identity,
---With the necessary lifting dealing with function return and call
---TODO is this right?
+-- |Our transfer funciton is basically the identity,
+-- |With the necessary lifting dealing with function return and call
 transferFun
   :: Lattice SDG
   -> Map.HashMap SDGNode (EmbPayload SDGNode SDG)
@@ -95,7 +107,7 @@ transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = ca
 
 transferFun Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = lhat
 
---Go through our CFG and determine if an edge is a control-flow edges
+-- | Determines if a CFG edge is for a special function call/return action
 --to go in our call-graph
 isFunctionEdge :: (LabelNode, LabelNode) -> Bool
 isFunctionEdge edge = case edge of
@@ -103,9 +115,15 @@ isFunctionEdge edge = case edge of
   (ProcExit _, Return _ _ ) -> True
   _ -> False
 
+-- | Given a CFG edge, make an SDG edge for the special function action of the edge
 makeFunctionEdge :: (LabelNode, LabelNode) -> (SDGNode, SDGNode)
 makeFunctionEdge (n1, n2) = (SDGFunction n1, SDGFunction n2)
 
+{-| Given function info about imported functions,
+the names of functions this module exports, and the expression for this module,
+return the ProgramInfo of its SDG, and the list of extremal SDG nodes
+for the exported functions
+|-}
 sdgProgInfo
   :: NormalMap.Map Var FunctionInfo
   -> [Name]
@@ -138,11 +156,18 @@ sdgProgInfo initFnInfo names eAnn = do
 
     return (pinfo, Set.toList sdgTargets)
 
+-- | Use function application to get the reached set from an embellished-lattice value
+--TODO all?
 setFromEmb :: EmbPayload SDGNode SDG -> Set.Set SDGNode
 setFromEmb (EmbPayload (_, lhat)) = unSDG $ lhat []
 
 
-
+{-|
+Given info about imported functions,
+the list of names this module exports,
+and the canonical expression for this module,
+return the module with its unused definitions removed.
+|-}
 removeDeadCode
   :: NormalMap.Map Var FunctionInfo
     -> [Name]
@@ -168,8 +193,8 @@ removeDeadCode initFnInfo targetVars e = case dependencyMap of
       let defMap = Map.map (\(EmbPayload (_, lhat)) -> lhat []) embDefMap
       return $  (defMap, targetNodes)
 
---Given a set of target nodes, a map from nodes to other nodes depending on that node,
---And a module's expression, traverse the tree and remove unnecessary Let definitions
+-- |Given a set of target nodes, a map from nodes to other nodes depending on that node,
+-- | And a module's expression, traverse the tree and remove unnecessary Let definitions
 removeDefs
   :: [Optimize.SDG.SDGNode]
   -> Map.HashMap SDGNode SDG
@@ -184,6 +209,10 @@ removeDefs targetNodes depMap eAnn =
              in A ann $ Let (newDefs) defBody
           _ -> A ann eToTrans ) eAnn
 
+{-|
+Remove monadic assignment statements from a monadic function,
+if they don't influence the final return value
+|-}
 removeDefsMonadic
   :: [Optimize.SDG.SDGNode]
   -> Map.HashMap SDGNode SDG
@@ -202,18 +231,19 @@ removeDefsMonadic targetNodes depMap eAnn = trace ("!!Removing monadic defs  \n\
         (\d@(GenericDef pat body ty) -> let
           newBody =
             if (trace ("\n Is Statement? " ++ show (isStateMonadFn ty)) $ isStateMonadFn ty)
-            then (monadRemoveStatements (getLabel eAnn) targetNodes depMap (functionBody body ))
+            then (monadRemoveStatements targetNodes depMap (functionBody body ))
             else body
         in GenericDef pat newBody ty) defList
 
-
+-- | Get the annotation for a given function
 getAnn (A a _) = a
 
---Given a list of target nodes,
--- a mapping of nodes to nodes they are relevant to (result of our FP iteration)
--- and a Definition, return true if we should keep the definition
-monadRemoveStatements :: Label -> [SDGNode] -> Map.HashMap SDGNode SDG -> LabeledExpr -> LabeledExpr
-monadRemoveStatements _defLabel targetNodes reachedNodesMap monadBody = trace "!!!MonadRemove"$
+-- | Given a  list of target nodes,
+-- | a mapping of nodes to nodes they are relevant to (result of our FP iteration)
+-- | and the body of a monadic function
+-- | Return that monadic function with irrelevant statements removed
+monadRemoveStatements :: [SDGNode] -> Map.HashMap SDGNode SDG -> LabeledExpr -> LabeledExpr
+monadRemoveStatements  targetNodes reachedNodesMap monadBody = trace "!!!MonadRemove"$
   let
     op = Var.Canonical (Var.Module ["State", "Escapable"] ) ("andThen")
     (patStatements, lastStmt) = sequenceMonadic monadBody
@@ -237,10 +267,10 @@ monadRemoveStatements _defLabel targetNodes reachedNodesMap monadBody = trace "!
   in reAssemble (reverse newList) lastStmt
 
 
-
---Given a list of target nodes,
--- a mapping of nodes to nodes they are relevant to (result of our FP iteration)
--- and a Definition, return true if we should keep the definition
+-- | Given the label for the RHS of a definition,
+-- | a list of target nodes,
+-- | a mapping of nodes to nodes they are relevant to (result of our FP iteration)
+-- | and a Definition, return true if we should keep the definition
 defIsRelevant :: Label -> [SDGNode] -> Map.HashMap SDGNode SDG -> LabelDef -> Bool
 defIsRelevant defLabel targetNodes reachedNodesMap (GenericDef pat expr _ty) = let
         definedVars = getPatternVars pat
@@ -255,8 +285,8 @@ defIsRelevant defLabel targetNodes reachedNodesMap (GenericDef pat expr _ty) = l
 
 
 
---TODO label definitions, not Let statements
-
+-- | Given interfaces of imported modules, a module and its interface
+-- | Perform dead code elimination on that module
 removeModuleDeadCode :: ModuleOptFun
 removeModuleDeadCode otherIfaces modName  (modul, iface) = trace (show modName) $ let
     fnInfo = interfaceFnInfo otherIfaces

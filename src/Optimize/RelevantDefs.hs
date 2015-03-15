@@ -9,16 +9,13 @@ module Optimize.RelevantDefs (getRelevantDefs) where
 import           AST.Annotation               (Annotated (..))
 --import qualified AST.Expression.Canonical   as Canon
 import           AST.Expression.General
-import qualified AST.Module                   as Module
 import qualified AST.Pattern                  as Pattern
-import qualified AST.Variable                 as Variable
 import           Control.Monad
 import qualified Data.List                    as List
 import qualified Data.HashMap.Strict                     as Map
 import qualified Data.Map as NormalMap
 import qualified Data.IntMap                     as IntMap
 import qualified Data.Set                     as Set
-import           Elm.Compiler.Module
 import           Optimize.Traversals
 
 
@@ -34,19 +31,20 @@ import qualified Data.HashSet as HSet
 import Data.Hashable 
 
 import           Optimize.ControlFlow         hiding (trace)
-import qualified  Data.HashSet as HSet
 
 import           Debug.Trace                  (trace)
 --trace _ x = x
 
 --How long do we let our call strings be?
+contextDepth :: Int
 contextDepth = 1
 
+-- | Insert all of the given key-element pairs into a dictionary
 insertAll :: (Hashable k, Eq k) => [(k,a)] -> Map.HashMap k a -> Map.HashMap k a
 insertAll pairs theMap = List.foldl' (\m (k,a) -> Map.insert k a m) theMap pairs
 
 
-
+{-
 getFreeVars :: [LabelNode] ->  [VarPlus]
 getFreeVars nodes = let
     freeVars = Set.toList $ foldr (
@@ -58,11 +56,22 @@ getFreeVars nodes = let
       in varsSoFar `Set.union` (Set.fromList thisLevelVars)
       ) Set.empty nodes
   in  freeVars
+-}
 
 
 
+{-|
+Given function info for imported modules,
+and an expression representing a module,
+return the control flow graph (in programInfo),
+a dictionary containing relevant definitions for each program point,
+and the list of nodes for the exit of all exported functions.
 
---Give the list of definitions
+A definition is considered relevant if it reaches a given expression,
+and if one of the variables defined is referenced in the expression.
+These will become the data-dependency edges, which we transitively
+follow in our SDG analysis later.
+|-}
 getRelevantDefs
   :: NormalMap.Map Var FunctionInfo
   -> LabeledExpr
@@ -124,6 +133,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
                          HSet.filter (isExprRef fnInfo expDict x) s) theDefs
       in trace ("\n\nRelevant Defs \n\n" ++ show relevantDefs )$ Just (pinfo, relevantDefs, targetNodes)
 
+-- | Useful for debuggin
 instance Show (ProgramInfo LabelNode) where
   show (ProgramInfo { edgeMap = pinfo_edgeMap,
                       allLabels = pinfo_allLabels,
@@ -131,6 +141,14 @@ instance Show (ProgramInfo LabelNode) where
                       isExtremal = pinfo_isExtremal }) =
     show pinfo_allLabels ++ show pinfo_labelPairs
 
+{-|
+Given function info for a module,
+the map of labels to their expressions,
+a node for an expression,
+and a pair of variable-definition points,
+return whether the expression for the given node
+references the given variable.
+|-}
 isExprRef
   :: NormalMap.Map Var FunctionInfo
   -> IntMap.IntMap LabeledExpr
@@ -157,6 +175,12 @@ isExprRef fnInfo exprs lnode (vplus,  _) = let
       FormalParam pat _ -> or $ map (expContainsVar e) $ getPatternVars pat
 isExprRef _ _ _ _ = False --If not in "Just" form, we ignore, since is uninitialized variable
 
+{-|
+Given the entry nodes for all exported procedures in a module,
+the list of all nodes in a control flow graph,
+and the list of all edges in a control flow graph,
+return the ProgramInfo which we can give to our Fixpoint algorithm
+|-}
 makeProgramInfo :: Set.Set LabelNode -> [LabelNode] -> [(LabelNode, LabelNode)] -> ProgramInfo LabelNode
 makeProgramInfo initialNodes allLabels edgeList = let
     --first fmap is over labels, second is over pair
@@ -168,17 +192,22 @@ makeProgramInfo initialNodes allLabels edgeList = let
     isExtremal = (`Set.member` initialNodes)
   in ProgramInfo edgeFn allLabels edgeList isExtremal
 
+-- | Easy synonym for our payload type
 type RDef = (VarPlus, Label)
 
 instance Hashable RDef where
   hashWithSalt _ (_, label) = label
 
+-- | The payload of our lattice: sets of reaching definitions for each program point
 newtype ReachingDefs = ReachingDefs (HSet.HashSet RDef)
                       deriving ( Show)
 
 instance Eq ReachingDefs where
   (ReachingDefs s1) == (ReachingDefs s2) = s1 == s2
 
+-- | The lattice for reaching definitions
+-- | Join is just union
+-- | Our iota value is the empty set, since Elm never allows variables to be undefined.
 --TODO check this
 reachingDefsLat :: HSet.HashSet RDef -> Lattice ReachingDefs
 reachingDefsLat iotaVal =
@@ -195,6 +224,10 @@ reachingDefsLat iotaVal =
   }
 
 
+{-|
+Remove the definitions killed by a given statement
+i.e. those for variables that the statement assigns to.
+|-}
 removeKills :: LabelNode -> HSet.HashSet RDef -> HSet.HashSet RDef
 removeKills (Assign var _label) aIn = HSet.filter (notKilled) aIn
   where notKilled (!setVar, _setLab) = (setVar /= var)
@@ -206,7 +239,9 @@ removeKills (AssignParam var _ _label) aIn = HSet.filter (notKilled) aIn
 removeKills _ aIn = aIn
 
 --TODO special case for return in ref-set
-
+{-|
+Return the set of definitions generated by a statement.
+|-}
 gens :: LabelNode -> HSet.HashSet RDef
 gens (Assign !var !label) = HSet.singleton (var, label)
 gens (AssignParam !var _ !label) = HSet.singleton (var, label)
@@ -215,17 +250,18 @@ gens _ = HSet.empty
 
 
 
---Transfer function for reaching definitions, we find the fixpoint for this
+-- | Transfer function for reaching definitions, we find the fixpoint for this
 transferFun :: Map.HashMap LabelNode ReachingDefs -> LabelNode -> ReachingDefs -> ReachingDefs
 transferFun labMap cfgNode (ReachingDefs aIn) =
   ReachingDefs $ (removeKills cfgNode aIn) `HSet.union` (gens cfgNode)
 
-
+-- | The list of all variables referenced in a generic definition
 genericDefVars :: GenericDef a Var -> [Var]
 genericDefVars (GenericDef p _ _) = getPatternVars p
 
 
-
+-- | Given the set of all valid call strings and our extremal value
+-- | Generate the embellished lattice corresponding to ReachingDefinition analysis
 embellishedRD
   :: [[LabelNode]]
   -> HSet.HashSet RDef
@@ -235,11 +271,14 @@ embellishedRD domain iotaVal  =
     lat = (reachingDefsLat iotaVal)
   in liftToEmbellished domain (ReachingDefs iotaVal) lat
 
+-- | The special 2-argument transfer function for return blocks
 returnTransfer :: (LabelNode, LabelNode) -> (ReachingDefs, ReachingDefs) -> ReachingDefs
 returnTransfer (lc, lr) (ReachingDefs aCall, ReachingDefs  aRet ) =
   ReachingDefs $ (removeKills lr (removeKills lc (aCall `HSet.union` aRet )))
     `HSet.union` (gens lc) `HSet.union` (gens lr)
 
+-- | Our transfer function, lifted to operate on our embellished lattice
+-- | Manipulates the context for call and return nodes
 liftedTransfer
   :: HSet.HashSet RDef
   -> Map.HashMap LabelNode (EmbPayload LabelNode ReachingDefs)
