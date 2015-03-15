@@ -3,6 +3,10 @@
 --Utrecht University, APA 2015
 --Project one: dataflow analysis
 
+{-|
+General framework for constructing lattices and finding fixpoints
+of monotone functions.
+|-}
 module Optimize.MonotoneFramework (
   AnalysisDirection(..),
   ProgramInfo(..),
@@ -12,13 +16,7 @@ module Optimize.MonotoneFramework (
   printGraph
   )where
 
-import qualified Data.Set                          as Set
---import Data.Ix
---import Data.Array.ST
---import Control.Monad
---import Control.Monad.ST
 import qualified Data.HashMap.Strict                          as Map
---import qualified Data.Array as Array
 
 import qualified Data.Graph.Inductive.Graph        as Graph
 import qualified Data.Graph.Inductive.PatriciaTree as Gr
@@ -26,9 +24,9 @@ import qualified Data.Graph.Inductive.PatriciaTree as Gr
 import qualified Data.GraphViz                     as Viz
 import qualified Data.GraphViz.Attributes.Complete as VA
 import           Data.GraphViz.Printing            (renderDot)
+import Data.List (foldl')
 
 import Data.Hashable
-import           Optimize.Types
 
 import           Data.Text.Lazy                    (pack, unpack)
 
@@ -36,8 +34,6 @@ import Debug.Trace (trace)
 --TODO remove
 --trace _ x = x
 
---Wrapper for a control flow graph
---newtype CFG block = CFG (Set.Set (block, block))
 
 newtype FlowEdge label = FlowEdge (label, label)
 
@@ -52,6 +48,10 @@ data ProgramInfo label = ProgramInfo {
 
   }
 
+{-|
+Useful for debugging. Prints the graphviz string to render
+a representation of a control-flow graph
+|-}
 printGraph
   :: (Ord label)
   => (label -> Int)
@@ -68,15 +68,18 @@ printGraph intMap strMap pInfo =
     ourParams = defaultParams {Viz.fmtNode = \(_,s) -> [VA.Label $ VA.StrLabel $ pack s]}
   in unpack $ renderDot $ Viz.toDot $ Viz.graphToDot ourParams theGraph
 
-
+{-|
+Either reverse and edge, or don't, depending on whether we are doing
+forwards or backwards analysis
+|-}
 getFlowEdge :: AnalysisDirection -> (label,label) -> FlowEdge label
 getFlowEdge ForwardAnalysis e = FlowEdge e
 getFlowEdge BackwardAnalysis (l1, l2) = FlowEdge (l2, l1)
 
-
--- incoming :: (Ord block) => CFG block -> block -> Set.Set block
--- incoming (CFG controlFlow) l = Set.map snd $ Set.filter ((== l) . fst) controlFlow
-
+{-|
+Abstract type representing a lattice and the operations that can
+be performed on it.
+|-}
 data Lattice a = Lattice {
   --latticeTop :: a
   latticeBottom :: a,
@@ -86,13 +89,20 @@ data Lattice a = Lattice {
   flowDirection :: AnalysisDirection
   }
 
-
+{-|
+Iteratively join all the lattice elements in a list
+|-}
 joinAll :: (Lattice a) -> [a] -> a
-joinAll Lattice{..} = foldr latticeJoin latticeBottom
+joinAll Lattice{..} = foldl' latticeJoin latticeBottom
 
---worklist algo for least fixed point
---We don't actually need to pass in bottom, but it helps the typechecker
---figure out which lattice we're using
+{-|
+Given a Lattice,
+a transfer which takes current stored values, a block label, and a payload
+and produces a new payload,
+and the flow information for our program,
+generate the dictionaries representing the open and closed fix-points
+of the given transfer function.
+|-}
 minFP :: (Hashable label, Eq label, Show label, Show payload) =>
          Lattice payload
          -> (Map.HashMap label payload -> label -> payload -> payload)

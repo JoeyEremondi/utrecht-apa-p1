@@ -27,17 +27,11 @@ instance (Show b, Show a) => Show (EmbPayload a b)
       (List.intercalate " ;; " $
         map (\ d -> (show d) ++ " -> " ++ (show $ lhat d)) domain) ++ "\n"
 
-
-{-
-liftJoin
-  :: Lattice payload
-  -> (EmbPayload d payload)
-  -> (EmbPayload d payload)
-  -> (EmbPayload d payload)
-liftJoin lat = \(EmbPayload domain1 x) (EmbPayload domain2 y) ->
-  EmbPayload (domain1 ++ domain2) $ \ d -> (latticeJoin lat) (x d) (y d)
--}
-
+{-|
+Given two functions and their finite domains,
+determine if they are equal.
+|-}
+--TODO speed this up?
 fnEquality
   :: (Eq payload, Show payload, Show d)
   => EmbPayload d payload
@@ -47,6 +41,11 @@ fnEquality lh1@(EmbPayload (domain, lhat)) lh2@(EmbPayload (_, lhat')) =
     areEq = (map ( lhat $ ) domain) == (map (lhat' $ ) domain)
   in areEq
 
+{-|
+Given a domain of context-lists,
+an extremal lattice value, and a lattice over a payload,
+generate an embellished lattice which takes context into account.
+|-}
 liftToEmbellished
   :: (Eq payload, Show payload, Show d)
   => [[d]]
@@ -65,12 +64,24 @@ liftToEmbellished domain iotaVal lat =
     flowDirection = flowDirection lat
   }
 
+{-|
+Given a transfer function, lift it to apply element-wise
+to an embellished lattice value.
+|-}
 naiveLift :: (label -> payload -> payload) -> (label -> ( d -> payload) -> (d -> payload))
 naiveLift f lab lhat = (f lab) . lhat
 
+{-|
+Given a context-depth, an lattice, a transfer function,
+and a special 2-value transfer function for return blocks,
+return a transfer function operating on our embellished lattice.
+
+This function manipulates the context strings for Call and Return nodes
+to approximate function call strings.
+|-}
 liftToFn
   :: Int
-  -> Lattice (payload) --Our embellished lattice
+  -> Lattice (payload) --Our original lattice
   -> (Map.HashMap LabelNode payload -> LabelNode -> payload -> payload) --Original transfer function
   -> ((LabelNode, LabelNode) -> (payload, payload) -> payload) --special 2-value return function
   -> Map.HashMap LabelNode (EmbPayload LabelNode payload)
@@ -97,7 +108,12 @@ liftToFn _ _ f _ resultMap lnode (EmbPayload (domain, lhat)) = let
     simpleMap = (error "Shouldn't use resultMap in non lifted this case" )
   in EmbPayload (domain ,\d -> (f simpleMap lnode) (lhat d))
 
---TODO need reverse graph?
+{-|
+Given a module expression, generate a map from each function label
+to the list of functions it can directly call.
+We use this to generate all possible call strings
+of a given length.
+|-}
 callGraph :: LabeledExpr -> Map.HashMap Label [Label]
 callGraph (A _ (Let defs _)) =
   let
@@ -122,6 +138,11 @@ callGraph (A _ (Let defs _)) =
     callMap = Map.fromList $ zip fnLabels $ map (\body -> allCalls body) fnBodies
   in callMap
 
+{-|
+Given the set of all labels in a program, a maximum call string length,
+and the call-graph for a module,
+generate the list of all valid call strings, up to the given length.
+|-}
 contextDomain :: [Label] -> Int -> Map.HashMap Label [Label] -> [[Label]]
 contextDomain allLabels n callMap = helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
   where
