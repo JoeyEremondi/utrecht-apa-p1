@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE StandaloneDeriving   #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE OverlappingInstances #-}
 {-# LANGUAGE BangPatterns #-}
 module Optimize.RelevantDefs (getRelevantDefs) where
 
@@ -13,7 +14,9 @@ import qualified AST.Pattern                  as Pattern
 import qualified AST.Variable                 as Variable
 import           Control.Monad
 import qualified Data.List                    as List
-import qualified Data.Map                     as Map hiding ((!))
+import qualified Data.HashMap.Strict                     as Map
+import qualified Data.Map as NormalMap
+import qualified Data.IntMap                     as IntMap
 import qualified Data.Set                     as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
@@ -27,8 +30,11 @@ import           Optimize.Types
 import           AST.PrettyPrint              (pretty)
 import           Text.PrettyPrint.HughesPJ    (render)
 
+import qualified Data.HashSet as HSet
+import Data.Hashable 
 
 import           Optimize.ControlFlow         hiding (trace)
+import qualified  Data.HashSet as HSet
 
 import           Debug.Trace                  (trace)
 --trace _ x = x
@@ -36,7 +42,7 @@ import           Debug.Trace                  (trace)
 --How long do we let our call strings be?
 contextDepth = 1
 
-insertAll :: Ord k => [(k,a)] -> Map.Map k a -> Map.Map k a
+insertAll :: (Hashable k, Eq k) => [(k,a)] -> Map.HashMap k a -> Map.HashMap k a
 insertAll pairs theMap = List.foldl' (\m (k,a) -> Map.insert k a m) theMap pairs
 
 
@@ -58,10 +64,10 @@ getFreeVars nodes = let
 
 --Give the list of definitions
 getRelevantDefs
-  :: Map.Map Var FunctionInfo
+  :: NormalMap.Map Var FunctionInfo
   -> LabeledExpr
   -> Maybe (ProgramInfo LabelNode,
-           Map.Map LabelNode (Set.Set (VarPlus, Label)),
+           Map.HashMap LabelNode (HSet.HashSet (VarPlus, Label)),
            [LabelNode])
 getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
   let
@@ -73,7 +79,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
       --let (A _ (Let defs _)) = eAnn
       let fnLabels = map (\(GenericDef _ (A (_, l, _ ) _) _) -> l ) defs
       let fnInfo = trace ("#####Fn labels " ++ show fnLabels  ) foldr (\(GenericDef (Pattern.Var n) fnDef _ ) finfo ->
-              Map.insert (nameToCanonVar n)
+              NormalMap.insert (nameToCanonVar n)
               (FunctionInfo
                (getArity fnDef)
                (map (\pat -> FormalParam pat (getLabel fnDef) ) (functionArgPats fnDef))
@@ -82,8 +88,8 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
                (Just $ getLabel fnDef)
               ) finfo) initFnInfo defs
       (headDicts, tailDicts, edgeListList ) <- trace "Getting all edges" $ unzip3 `fmap` forM defs (allDefEdges fnInfo)
-      let headDict = trace "Getting head dict" $ Map.unions headDicts
-      let tailDict = Map.unions tailDicts
+      let headDict = trace "Getting head dict" $ IntMap.unions headDicts
+      let tailDict = IntMap.unions tailDicts
       functionEdgeListList <- forM defs (functionDefEdges (headDict, tailDict))
       let !initialNodes = [ProcEntry (getLabel body)| (GenericDef (Pattern.Var n) body _ ) <- defs ]
       let !controlEdges = concat $ edgeListList ++ functionEdgeListList
@@ -101,12 +107,12 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
         labelInfo cnode = show  cnode
         nameMap = Map.mapWithKey
           (\node _ -> ("Node: " ++ labelInfo node ) ++ "\n\n" ++
-            (render $ pretty $ (expDict `mapGet` ( getNodeLabel node) ) ) )  intMap
-        reachMap = trace ("Call Graph\n\n" ++ (printGraph (intMap `mapGet`) (nameMap `mapGet`) pinfo) ++ "\n\n" ) $
+            (render $ pretty $ (expDict IntMap.! ( getNodeLabel node) ) ) )  intMap
+        reachMap = 
           callGraph eAnn
         domain = map (\d -> map Call d) $ contextDomain fnLabels contextDepth reachMap
         --freeVars = getFreeVars allNodes
-        !iotaVal = Set.fromList [] --TODO put back? -- [ (x, Nothing) | x <- freeVars]
+        !iotaVal = HSet.fromList [] --TODO put back? -- [ (x, Nothing) | x <- freeVars]
         !ourLat = embellishedRD domain  iotaVal
         --ourLat = reachingDefsLat iotaVal
         --(_, theDefsHat) = minFP ourLat transferFun pinfo
@@ -115,7 +121,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
         --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = trace ("\n\nTheDefs \n\n" ++ (show theDefs) ++ "\n\n\n" ) $ Map.mapWithKey
                        (\x (ReachingDefs s) ->
-                         Set.filter (isExprRef fnInfo expDict x) s) theDefs
+                         HSet.filter (isExprRef fnInfo expDict x) s) theDefs
       in trace ("\n\nRelevant Defs \n\n" ++ show relevantDefs )$ Just (pinfo, relevantDefs, targetNodes)
 
 instance Show (ProgramInfo LabelNode) where
@@ -126,13 +132,13 @@ instance Show (ProgramInfo LabelNode) where
     show pinfo_allLabels ++ show pinfo_labelPairs
 
 isExprRef
-  :: Map.Map Var FunctionInfo
-  -> Map.Map Label LabeledExpr
+  :: NormalMap.Map Var FunctionInfo
+  -> IntMap.IntMap LabeledExpr
   -> LabelNode
   -> (VarPlus, Label )
   -> Bool
 isExprRef fnInfo exprs lnode (vplus,  _) = let
-    e = case (exprs `mapGet` (getNodeLabel lnode)) of
+    e = case (exprs IntMap.! (getNodeLabel lnode)) of
       (A _ (Let defs body)) -> body --We only look for refs in the body of a let
       ex -> ex
   in case vplus of
@@ -142,7 +148,7 @@ isExprRef fnInfo exprs lnode (vplus,  _) = let
       IntermedExpr l ->  expContainsLabel e l
       FormalReturn v ->
         --check if we reference the function called --TODO more advanced?
-        (expContainsVar e v) || case (lnode, topFnLabel `fmap` Map.lookup v fnInfo) of
+        (expContainsVar e v) || case (lnode, topFnLabel `fmap` NormalMap.lookup v fnInfo) of
           (ProcExit l1, Just ( Just l2)) -> l1 == l2
           (Return v2 _, _ ) -> v == v2
           _ -> False
@@ -157,56 +163,62 @@ makeProgramInfo initialNodes allLabels edgeList = let
     --labelEdges = List.nub $ map (\(node1, node2) -> (fmap getLab node1, fmap getLab node2)) edgeList
     --allLabels = List.nub $ concat $ [[n,n'] | (n,n') <- edgeList]
     initialEdgeMap = Map.fromList $ zip allLabels $ repeat []
-    edgeMap = foldr (\(l1, l2) env -> Map.insert l1 ([l2] ++ (env `mapGet` l1)  ) env) initialEdgeMap edgeList
-    edgeFn = (\node ->  edgeMap `mapGet` node)
+    edgeMap = foldr (\(l1, l2) env -> Map.insert l1 ([l2] ++ (env Map.! l1)  ) env) initialEdgeMap edgeList
+    edgeFn = (\node ->  edgeMap Map.! node)
     isExtremal = (`Set.member` initialNodes)
   in ProgramInfo edgeFn allLabels edgeList isExtremal
 
 type RDef = (VarPlus, Label)
 
-newtype ReachingDefs = ReachingDefs (Set.Set RDef)
-                      deriving (Eq, Ord, Show)
+instance Hashable RDef where
+  hashWithSalt _ (_, label) = label
+
+newtype ReachingDefs = ReachingDefs (HSet.HashSet RDef)
+                      deriving ( Show)
+
+instance Eq ReachingDefs where
+  (ReachingDefs s1) == (ReachingDefs s2) = s1 == s2
 
 --TODO check this
-reachingDefsLat :: Set.Set RDef -> Lattice ReachingDefs
+reachingDefsLat :: HSet.HashSet RDef -> Lattice ReachingDefs
 reachingDefsLat iotaVal =
   let
-    rdefJoin (ReachingDefs l1) (ReachingDefs l2) = ReachingDefs (l1 `Set.union` l2)
-    rdefLleq (ReachingDefs l1) (ReachingDefs l2) = l1 `Set.isSubsetOf` l2
+    rdefJoin (ReachingDefs l1) (ReachingDefs l2) = ReachingDefs (l1 `HSet.union` l2)
+    rdefLleq (ReachingDefs l1) (ReachingDefs l2) = HSet.null $ HSet.difference l1  l2
 
   in Lattice {
-  latticeBottom = ReachingDefs (Set.empty),
+  latticeBottom = ReachingDefs (HSet.empty),
   latticeJoin  = rdefJoin,
-  iota = ReachingDefs (Set.empty), --TODO is this okay? --ReachingDefs iotaVal,
+  iota = ReachingDefs (HSet.empty), --TODO is this okay? --ReachingDefs iotaVal,
   lleq = rdefLleq,
   flowDirection = ForwardAnalysis --TODO forward or back?
   }
 
 
-removeKills :: LabelNode -> Set.Set RDef -> Set.Set RDef
-removeKills (Assign var _label) aIn = Set.filter (notKilled) aIn
+removeKills :: LabelNode -> HSet.HashSet RDef -> HSet.HashSet RDef
+removeKills (Assign var _label) aIn = HSet.filter (notKilled) aIn
   where notKilled (!setVar, _setLab) = (setVar /= var)
 --Return is a special case, because there's an implicit unnamed variable we write to
 --removeKills (Return _fnVar label) aIn = Set.filter (not . isKilled) aIn
 --  where isKilled (setVar, _setLab) = (setVar == IntermedExpr label)
-removeKills (AssignParam var _ _label) aIn = Set.filter (notKilled) aIn
+removeKills (AssignParam var _ _label) aIn = HSet.filter (notKilled) aIn
   where notKilled (!setVar, _setLab) = (setVar /= var)
 removeKills _ aIn = aIn
 
 --TODO special case for return in ref-set
 
-gens :: LabelNode -> Set.Set RDef
-gens (Assign !var !label) = Set.singleton (var, label)
-gens (AssignParam !var _ !label) = Set.singleton (var, label)
-gens (ExternalCall !v _) = Set.singleton (FormalReturn v, Label 0) --TODO what label?
-gens _ = Set.empty
+gens :: LabelNode -> HSet.HashSet RDef
+gens (Assign !var !label) = HSet.singleton (var, label)
+gens (AssignParam !var _ !label) = HSet.singleton (var, label)
+gens (ExternalCall !v _) = HSet.singleton (FormalReturn v, externalCallLabel)
+gens _ = HSet.empty
 
 
 
 --Transfer function for reaching definitions, we find the fixpoint for this
-transferFun :: Map.Map LabelNode ReachingDefs -> LabelNode -> ReachingDefs -> ReachingDefs
+transferFun :: Map.HashMap LabelNode ReachingDefs -> LabelNode -> ReachingDefs -> ReachingDefs
 transferFun labMap cfgNode (ReachingDefs aIn) =
-  ReachingDefs $ (removeKills cfgNode aIn) `Set.union` (gens cfgNode)
+  ReachingDefs $ (removeKills cfgNode aIn) `HSet.union` (gens cfgNode)
 
 
 genericDefVars :: GenericDef a Var -> [Var]
@@ -216,21 +228,21 @@ genericDefVars (GenericDef p _ _) = getPatternVars p
 
 embellishedRD
   :: [[LabelNode]]
-  -> Set.Set RDef
+  -> HSet.HashSet RDef
   -> Lattice (EmbPayload LabelNode ReachingDefs)
 embellishedRD domain iotaVal  =
   let
     lat = (reachingDefsLat iotaVal)
-  in trace ("Lifting with domain "  ++ show domain)$ liftToEmbellished domain (ReachingDefs iotaVal) lat
+  in liftToEmbellished domain (ReachingDefs iotaVal) lat
 
 returnTransfer :: (LabelNode, LabelNode) -> (ReachingDefs, ReachingDefs) -> ReachingDefs
 returnTransfer (lc, lr) (ReachingDefs aCall, ReachingDefs  aRet ) =
-  ReachingDefs $ (removeKills lr (removeKills lc (aCall `Set.union` aRet )))
-    `Set.union` (gens lc) `Set.union` (gens lr)
+  ReachingDefs $ (removeKills lr (removeKills lc (aCall `HSet.union` aRet )))
+    `HSet.union` (gens lc) `HSet.union` (gens lr)
 
 liftedTransfer
-  :: Set.Set RDef
-  -> Map.Map LabelNode (EmbPayload LabelNode ReachingDefs)
+  :: HSet.HashSet RDef
+  -> Map.HashMap LabelNode (EmbPayload LabelNode ReachingDefs)
   -> LabelNode
   -> (EmbPayload LabelNode  ReachingDefs)
   -> (EmbPayload LabelNode  ReachingDefs)

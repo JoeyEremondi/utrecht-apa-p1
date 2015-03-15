@@ -12,10 +12,12 @@ import           Optimize.MonotoneFramework
 import           Optimize.Traversals
 import           Optimize.Types
 
+import qualified Data.Map as NormalMap
+
 import           Debug.Trace                (trace)
 
 
-import qualified Data.Map                   as Map
+import qualified Data.HashMap.Strict                   as Map
 
 newtype EmbPayload a b = EmbPayload ([[a]], ([a] -> b))
 
@@ -69,9 +71,9 @@ naiveLift f lab lhat = (f lab) . lhat
 liftToFn
   :: Int
   -> Lattice (payload) --Our embellished lattice
-  -> (Map.Map LabelNode payload -> LabelNode -> payload -> payload) --Original transfer function
+  -> (Map.HashMap LabelNode payload -> LabelNode -> payload -> payload) --Original transfer function
   -> ((LabelNode, LabelNode) -> (payload, payload) -> payload) --special 2-value return function
-  -> Map.Map LabelNode (EmbPayload LabelNode payload)
+  -> Map.HashMap LabelNode (EmbPayload LabelNode payload)
   -> LabelNode
   -> (EmbPayload LabelNode payload)
   -> (EmbPayload LabelNode payload)
@@ -96,18 +98,18 @@ liftToFn _ _ f _ resultMap lnode (EmbPayload (domain, lhat)) = let
   in EmbPayload (domain ,\d -> (f simpleMap lnode) (lhat d))
 
 --TODO need reverse graph?
-callGraph :: LabeledExpr -> Map.Map Label [Label]
+callGraph :: LabeledExpr -> Map.HashMap Label [Label]
 callGraph (A _ (Let defs _)) =
   let
     fnNames = map (\(GenericDef (Pattern.Var n) _ _) -> nameToCanonVar n) defs
     fnBodies = map (\(GenericDef _ body _) -> functionBody body ) defs
     fnLabels = map functionLabel defs
-    labelDict = Map.fromList $ zip fnNames fnLabels
+    labelDict = NormalMap.fromList $ zip fnNames fnLabels
 
     oneLevelCalls () expr subCalls = (concat subCalls) ++ case expr of
       (A _ (App (A _ (Var fnName)) _)) ->
-        if (Map.member fnName labelDict)
-           then [labelDict Map.! fnName]
+        if (NormalMap.member fnName labelDict)
+           then [labelDict NormalMap.! fnName]
            else []
       _ -> []
 
@@ -120,7 +122,7 @@ callGraph (A _ (Let defs _)) =
     callMap = Map.fromList $ zip fnLabels $ map (\body -> allCalls body) fnBodies
   in callMap
 
-contextDomain :: [Label] -> Int -> Map.Map Label [Label] -> [[Label]]
+contextDomain :: [Label] -> Int -> Map.HashMap Label [Label] -> [[Label]]
 contextDomain allLabels n callMap = helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
   where
     helper 0 _ _ = [[]]

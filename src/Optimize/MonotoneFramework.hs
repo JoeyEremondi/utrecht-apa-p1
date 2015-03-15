@@ -17,7 +17,7 @@ import qualified Data.Set                          as Set
 --import Data.Array.ST
 --import Control.Monad
 --import Control.Monad.ST
-import qualified Data.Map                          as Map
+import qualified Data.HashMap.Strict                          as Map
 --import qualified Data.Array as Array
 
 import qualified Data.Graph.Inductive.Graph        as Graph
@@ -27,6 +27,7 @@ import qualified Data.GraphViz                     as Viz
 import qualified Data.GraphViz.Attributes.Complete as VA
 import           Data.GraphViz.Printing            (renderDot)
 
+import Data.Hashable
 import           Optimize.Types
 
 import           Data.Text.Lazy                    (pack, unpack)
@@ -92,11 +93,11 @@ joinAll Lattice{..} = foldr latticeJoin latticeBottom
 --worklist algo for least fixed point
 --We don't actually need to pass in bottom, but it helps the typechecker
 --figure out which lattice we're using
-minFP :: (Ord label, Show label, Show payload) =>
+minFP :: (Hashable label, Eq label, Show label, Show payload) =>
          Lattice payload
-         -> (Map.Map label payload -> label -> payload -> payload)
+         -> (Map.HashMap label payload -> label -> payload -> payload)
          -> ProgramInfo label
-         -> (Map.Map label payload, Map.Map label payload)
+         -> (Map.HashMap label payload, Map.HashMap label payload)
 minFP lat@(Lattice{..}) f info = trace ("In MinFP" ++ show (length $ labelPairs info) ) $ (mfpOpen, mfpClosed)
   where
     mfpClosed = Map.mapWithKey (f mfpOpen) mfpOpen

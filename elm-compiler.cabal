@@ -140,7 +140,8 @@ Library
         array,
         elm-core-sources,
         fgl,
-        graphviz
+        graphviz,
+        hashable
 
 
 Executable elm-doc
@@ -192,7 +193,8 @@ Executable elm-doc
         process,
         text >= 1 && < 2,
         transformers >= 0.2 && < 0.5,
-        union-find >= 0.2 && < 0.3
+        union-find >= 0.2 && < 0.3,
+        hashable
 
 
 Test-Suite compiler-tests
@@ -245,7 +247,8 @@ Test-Suite compiler-tests
         unordered-containers >= 0.1 && < 0.3,
         elm-core-sources,
         fgl,
-        graphviz 
+        graphviz,
+        hashable 
 
 
 Test-Suite apa-tests
@@ -299,4 +302,5 @@ Test-Suite apa-tests
         unordered-containers >= 0.1 && < 0.3,
         elm-core-sources,
         fgl,
-        graphviz 
+        graphviz,
+        hashable

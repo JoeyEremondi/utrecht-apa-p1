@@ -12,12 +12,18 @@ import           Elm.Compiler.Module
 import           Optimize.Environment
 import           Optimize.Traversals
 
+import qualified Data.HashMap.Strict as HashMap
+
 import           Optimize.Types
+import Data.Hashable
 
 import           Debug.Trace                (trace)
 
 newtype IsReachable = IsReachable {fromReachable :: Bool}
   deriving (Eq, Ord, Show)
+
+instance Hashable Var.Canonical where
+  hashWithSalt _ var = hash (Var.name var)
 
 mapGet m k = case (Map.lookup k m) of
   Just e -> e
@@ -76,11 +82,11 @@ makeProgramInfo targets mods = ProgramInfo (eMap) allLabs labPairs isExtr
     --TODO bad design?
     isExtr var = var `elem` targetVars
 
-transferFun :: Map.Map Var.Canonical IsReachable -> Var.Canonical -> IsReachable -> IsReachable
+transferFun :: HashMap.HashMap Var.Canonical IsReachable -> Var.Canonical -> IsReachable -> IsReachable
 transferFun _ _ r = r
 
 findReachable :: [Name] -> [(Name, Module)] -> Map.Map Var.Canonical IsReachable
-findReachable targets mods = snd $ minFP isReachableLattice transferFun
+findReachable targets mods = Map.fromList $ HashMap.toList $ snd $ minFP isReachableLattice transferFun
                              $ makeProgramInfo targets mods
 
 reachabilityMap :: [Name] -> [(Name, Module)] -> Map.Map Var.Canonical Bool

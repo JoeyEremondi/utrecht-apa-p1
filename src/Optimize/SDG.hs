@@ -8,7 +8,8 @@ import qualified AST.Module                   as Module
 import qualified AST.Pattern                  as Pattern
 import           Control.Monad
 import qualified Data.List                    as List
-import qualified Data.Map                     as Map hiding ((!))
+import qualified Data.HashMap.Strict                     as Map
+import qualified Data.Map as NormalMap
 import qualified Data.Set                     as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
@@ -24,6 +25,9 @@ import qualified AST.Variable                 as Var
 import           Optimize.ControlFlow         hiding (trace)
 import           Optimize.EmbellishedMonotone
 import           Optimize.RelevantDefs
+import Data.Hashable
+
+import qualified Data.HashSet as HSet
 
 --import Optimize.Reachability (reachabilityMap)
 
@@ -35,9 +39,16 @@ contextDepth = 2
 data SDGNode = SDGDef VarPlus Label | SDGLabel Label | SDGFunction LabelNode
   deriving (Eq, Ord, Show)
 
+instance Hashable SDGNode where
+  hashWithSalt _ n = case n of
+    SDGDef _ l -> l
+    SDGLabel l -> l
+    SDGFunction ln -> getNodeLabel ln
+
 --The system dependence graph
 newtype SDG = SDG {unSDG :: Set.Set SDGNode}
   deriving (Eq, Ord, Show)
+
 
 makeTargetSet :: Set.Set LabelNode -> Set.Set SDGNode
 makeTargetSet = Set.map toSDG
@@ -66,7 +77,7 @@ embForwardSliceLat domain startDefs  =
 --TODO is this right?
 transferFun
   :: Lattice SDG
-  -> Map.Map SDGNode (EmbPayload SDGNode SDG)
+  -> Map.HashMap SDGNode (EmbPayload SDGNode SDG)
   -> SDGNode
   -> EmbPayload SDGNode SDG
   -> EmbPayload SDGNode SDG
@@ -77,7 +88,7 @@ transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = ca
         possibleEnds = [ldom | ldom <- domain, (take contextDepth (lc:ldom)) == (lc:d') ]
       in joinAll lat [pl dPoss | dPoss <- possibleEnds]) )
   SDGFunction (Return fn l) -> let
-      (EmbPayload (domain2, lcall)) = resultDict `mapGet` (SDGFunction $ Call l)
+      (EmbPayload (domain2, lcall)) = resultDict Map.! (SDGFunction $ Call l)
     in EmbPayload (domain,  \d ->
      (lcall d) `latticeJoin` (pl ((SDGFunction $ Call l):d) ) )
   _ -> lhat
@@ -96,7 +107,7 @@ makeFunctionEdge :: (LabelNode, LabelNode) -> (SDGNode, SDGNode)
 makeFunctionEdge (n1, n2) = (SDGFunction n1, SDGFunction n2)
 
 sdgProgInfo
-  :: Map.Map Var FunctionInfo
+  :: NormalMap.Map Var FunctionInfo
   -> [Name]
   -> LabeledExpr
   -> Maybe (ProgramInfo SDGNode, [SDGNode])
@@ -108,7 +119,7 @@ sdgProgInfo initFnInfo names eAnn = do
     let controlEdges = [] --TODO need control flow edges?s
     let dataEdges =
           concat $ Map.elems $ Map.mapWithKey
-            (\n rdSet -> [(SDGDef var def, toSDG n) | (var,  def) <- (Set.toList rdSet)] ) relevantDefs
+            (\n rdSet -> [(SDGDef var def, toSDG n) | (var,  def) <- (HSet.toList rdSet)] ) relevantDefs
     let originalLabels = map toSDG $ Map.keys relevantDefs
     --If n1 depends on def at label lab, then we have lab -> n1 as dependency
     --TODO is this right?
@@ -133,7 +144,7 @@ setFromEmb (EmbPayload (_, lhat)) = unSDG $ lhat []
 
 
 removeDeadCode
-  :: Map.Map Var FunctionInfo
+  :: NormalMap.Map Var FunctionInfo
     -> [Name]
     -> Canon.Expr
     -> Canon.Expr
@@ -143,7 +154,7 @@ removeDeadCode initFnInfo targetVars e = case dependencyMap of
        $ removeDefs targetNodes depMap eAnn
     -- $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where
-    eAnn = annotateCanonical (Map.empty)  (Label 1) e
+    eAnn = annotateCanonical (NormalMap.empty)  (startLabel) e
     dependencyMap = do
       (pinfo, targetNodes) <- sdgProgInfo initFnInfo targetVars eAnn
       let reachMap = callGraph eAnn
@@ -161,7 +172,7 @@ removeDeadCode initFnInfo targetVars e = case dependencyMap of
 --And a module's expression, traverse the tree and remove unnecessary Let definitions
 removeDefs
   :: [Optimize.SDG.SDGNode]
-  -> Map.Map SDGNode SDG
+  -> Map.HashMap SDGNode SDG
   -> LabeledExpr
   -> LabeledExpr
 removeDefs targetNodes depMap eAnn =
@@ -175,7 +186,7 @@ removeDefs targetNodes depMap eAnn =
 
 removeDefsMonadic
   :: [Optimize.SDG.SDGNode]
-  -> Map.Map SDGNode SDG
+  -> Map.HashMap SDGNode SDG
   -> LabeledExpr
   -> LabeledExpr
 removeDefsMonadic targetNodes depMap eAnn = trace ("!!Removing monadic defs  \n\n" ) $ case eAnn of
@@ -201,7 +212,7 @@ getAnn (A a _) = a
 --Given a list of target nodes,
 -- a mapping of nodes to nodes they are relevant to (result of our FP iteration)
 -- and a Definition, return true if we should keep the definition
-monadRemoveStatements :: Label -> [SDGNode] -> Map.Map SDGNode SDG -> LabeledExpr -> LabeledExpr
+monadRemoveStatements :: Label -> [SDGNode] -> Map.HashMap SDGNode SDG -> LabeledExpr -> LabeledExpr
 monadRemoveStatements _defLabel targetNodes reachedNodesMap monadBody = trace "!!!MonadRemove"$
   let
     op = Var.Canonical (Var.Module ["State", "Escapable"] ) ("andThen")
@@ -216,7 +227,7 @@ monadRemoveStatements _defLabel targetNodes reachedNodesMap monadBody = trace "!
                                      (SDGDef var compLab)<-Map.keys reachedNodesMap,
                                      compLab == getLabel stmt]--TODO make faster
            reachedNodes = Set.unions $ map
-             (\varNode -> case (reachedNodesMap `mapGet` varNode) of
+             (\varNode -> case (reachedNodesMap Map.! varNode) of
                     x -> unSDG x) ourAssigns
            isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
          in isRel ) patStatements
@@ -230,13 +241,13 @@ monadRemoveStatements _defLabel targetNodes reachedNodesMap monadBody = trace "!
 --Given a list of target nodes,
 -- a mapping of nodes to nodes they are relevant to (result of our FP iteration)
 -- and a Definition, return true if we should keep the definition
-defIsRelevant :: Label -> [SDGNode] -> Map.Map SDGNode SDG -> LabelDef -> Bool
+defIsRelevant :: Label -> [SDGNode] -> Map.HashMap SDGNode SDG -> LabelDef -> Bool
 defIsRelevant defLabel targetNodes reachedNodesMap (GenericDef pat expr _ty) = let
         definedVars = getPatternVars pat
         definedVarPlusses = map (\v -> NormalVar v defLabel) definedVars
         nodesForDefs = map (\var -> SDGDef var (getLabel expr)) definedVarPlusses
         reachedNodes = Set.unions $
-          map (\varNode -> case (reachedNodesMap `mapGet` varNode) of
+          map (\varNode -> case (reachedNodesMap Map.! varNode) of
                   x -> unSDG x) nodesForDefs
                   -- EmbPayload _ lhat -> unSDG $ lhat []) nodesForDefs
         isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes

@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Optimize.ControlFlow  where
 
 import           AST.Annotation             (Annotated (..))
@@ -22,11 +23,12 @@ import           Optimize.MonotoneFramework
 import           Optimize.Types
 
 import qualified Elm.Compiler.Module        as PublicModule
+import qualified Data.IntMap as IntMap
 
 
 
 import qualified AST.Type                   as Type
-
+import Data.Hashable
 import           Debug.Trace                (trace)
 --trace _ x = x
 
@@ -40,6 +42,7 @@ data VarPlus =
   | Ref Var
   | ExternalParam Int Var
     deriving (Eq, Ord, Show)
+
 --TODO how to make sure all our IntermedExprs are there?
 
 --Our different types of control nodes
@@ -58,13 +61,17 @@ data ControlNode' expr =
   -- | GlobalExit --Always the last node
     deriving (Functor, Eq, Ord, Show)
 
+instance Hashable ControlNode where
+  hashWithSalt _ n = getNodeLabel $ fmap (getLabel) n
 
+instance Hashable LabelNode where
+  hashWithSalt _ = getNodeLabel
 
 
 getNodeLabel :: ControlNode' Label -> Label
 getNodeLabel (Branch n) = n
-getNodeLabel (ExternalCall _ _) = Label 0 --TODO better default?
-getNodeLabel (ExternalStateCall _ _) = Label 0 --TODO better default?
+getNodeLabel (ExternalCall _ _) = externalCallLabel
+getNodeLabel (ExternalStateCall _ _) = externalCallLabel
 getNodeLabel (Assign _ n2) = n2
 getNodeLabel (AssignParam _ _ n2) = n2
 getNodeLabel (ExprEval n) = n
@@ -139,21 +146,21 @@ oneLevelEdges
   :: Map.Map Var FunctionInfo
   -> LabeledExpr
   -> [Maybe (
-     Map.Map Label [ControlNode]
-    ,Map.Map Label [ControlNode]--Entry and exit node for sub exps
+     IntMap.IntMap [ControlNode]
+    ,IntMap.IntMap [ControlNode]--Entry and exit node for sub exps
     --,[ControlNode]
     ,[ControlEdge]) ]
   -> Maybe (
-     Map.Map Label [ControlNode]
+     IntMap.IntMap [ControlNode]
 
-    ,Map.Map Label [ControlNode]--Entry and exit node for sub exps
+    ,IntMap.IntMap [ControlNode]--Entry and exit node for sub exps
     --,[ControlNode]
     ,[ControlEdge])
 oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level Defs\n" $ do
   (headMaps, tailMaps, {-subNodesL,-} subEdgesL) <- List.unzip3 `fmap` (mapM id maybeSubInfo) --Edges and nodes from our sub-expressions
   --let subNodes = concat subNodesL
-  let headMap = Map.unions headMaps
-  let tailMap = Map.unions tailMaps
+  let headMap = IntMap.unions headMaps
+  let tailMap = IntMap.unions tailMaps
   let subEdges = concat subEdgesL
   case expr of
     --Function: we have call and return for the call, and evaluating each arg is a mock assignment
@@ -181,9 +188,9 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
               let assignFormalNodes =
                     map (\(formal, arg) -> Assign formal arg) $ zip (formalParams thisFunInfo) argList
               --Control edges to generate
-              let firstHead = (headMap `mapGet` (getLabel $ head argList))
-              let otherHeads = map (\arg -> headMap `mapGet` (getLabel $ arg) ) $ tail argList
-              let tailLists = map (\arg -> tailMap `mapGet` (getLabel $ arg) )  argList
+              let firstHead = (headMap IntMap.! (getLabel $ head argList))
+              let otherHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) $ tail argList
+              let tailLists = map (\arg -> tailMap IntMap.! (getLabel $ arg) )  argList
               let (assignParamEdges, calcNextParamEdges, gotoFormalEdges) =
                     case argList of
                       [] -> error "Fn Call with no argument"
@@ -205,8 +212,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
           --TODO check for shadowing?
               case (fnArity == numArgs, inLocalScope) of
                 (True, False) -> return $
-                            (Map.insert (getLabel e) firstHead headMap,
-                             Map.insert (getLabel e) [ourTail] tailMap,
+                            (IntMap.insert (getLabel e) firstHead headMap,
+                             IntMap.insert (getLabel e) [ourTail] tailMap,
                               --[callNode, retNode] ++ (concat argNodes),
                              assignParamEdges ++ calcNextParamEdges ++ assignFormalEdges ++
                                gotoFormalEdges ++ callEdges ++
@@ -224,19 +231,19 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
         
            let ourHead = [ExprEval e]
            let ourTail = ourHead
-           return (Map.insert (getLabel e) ourHead headMap,
-                   Map.insert (getLabel e) ourTail tailMap,
+           return (IntMap.insert (getLabel e) ourHead headMap,
+                   IntMap.insert (getLabel e) ourTail tailMap,
                    subEdges) --Means we are a leaf node, no sub-expressions
          _ ->  (trace "In fallthrough version of getEdges" ) $ do
            --TODO need each sub-exp?
            let subExprs = (directSubExprs e) :: [LabeledExpr]
-           let subHeads = trace ("Sub Expressions: " ++ show subExprs ) $ map (\ex -> headMap `mapGet` (getLabel ex)) subExprs
-           let subTails = map (\ex -> tailMap `mapGet` (getLabel ex)) subExprs
+           let subHeads = map (\ex -> headMap IntMap.! (getLabel ex)) subExprs
+           let subTails = map (\ex -> tailMap IntMap.! (getLabel ex)) subExprs
            let ourHead = trace ("Sub heads " ++ show subHeads ++ "\nsub tails " ++ show subTails) $ head subHeads
            let ourTail = trace ("Sub edges " ++ show subEdges ) $ last subTails
            let subExpEdges = concatMap connectLists $ zip (init subTails) (tail subHeads)
-           return (Map.insert (getLabel e) ourHead headMap
-                 , Map.insert (getLabel e) ourTail tailMap
+           return (IntMap.insert (getLabel e) ourHead headMap
+                 , IntMap.insert (getLabel e) ourTail tailMap
                   --, subNodes
                   , subEdges ++ subExpEdges)  --Arithmetic doesn't need its own statements, since we can do inline
       False -> oneLevelEdges fnInfo (binOpToFn e) maybeSubInfo
@@ -250,11 +257,11 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       --let guardNodes = map Branch guards
       let bodyNodes = map (tailAssign $ getLabel e) bodyTails
       --Each guard is connected to the next guard, and the "head" control node of its body
-      let ourHead = headMap `mapGet` (getLabel $ head guards)
-      let otherHeads = map (\arg -> headMap `mapGet` (getLabel $ arg) ) (tail guards)
-      let guardEnds = map (\arg -> tailMap `mapGet` (getLabel $ arg) ) guards
+      let ourHead = headMap IntMap.! (getLabel $ head guards)
+      let otherHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) (tail guards)
+      let guardEnds = map (\arg -> tailMap IntMap.! (getLabel $ arg) ) guards
       let notLastGuardEnds = init guardEnds
-      let bodyHeads = map (\arg -> headMap `mapGet` (getLabel $ arg) ) bodies
+      let bodyHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) bodies
 
       let guardFallthroughEdges = concatMap connectLists $ zip notLastGuardEnds otherHeads
       let guardBodyEdges = concatMap connectLists $ zip guardEnds bodyHeads
@@ -263,8 +270,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let endEdges = connectLists (bodyNodes, ourTail)
 
       return (
-        Map.insert (getLabel e) ourHead headMap --First statement is eval first guard
-         ,Map.insert (getLabel e) ourTail tailMap --Last statements are any tail exps of bodies
+        IntMap.insert (getLabel e) ourHead headMap --First statement is eval first guard
+         ,IntMap.insert (getLabel e) ourTail tailMap --Last statements are any tail exps of bodies
         --,guardNodes ++ bodyNodes ++ subNodes
          ,subEdges ++ guardBodyEdges ++ guardFallthroughEdges  ++ endEdges)
     Case caseExpr patCasePairs -> do
@@ -279,17 +286,17 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       --let ourHead = case (headMap `mapGet` (getLabel caseExpr)) of
       --      [] -> [Assign (IntermedExpr $ getLabel caseExpr) caseExpr]
       --      headList -> headList
-      let ourHead = headMap `mapGet` (getLabel caseExpr)
+      let ourHead = headMap IntMap.! (getLabel caseExpr)
       let ourTail = [Assign (IntermedExpr (getLabel e)) theCase | theCase <- caseTailExprs]
 
-      let caseHeads = concatMap (\cs -> headMap `mapGet` (getLabel cs) ) cases
+      let caseHeads = concatMap (\cs -> headMap IntMap.! (getLabel cs) ) cases
       let branchEdges = connectLists (ourHead, [branchNode])
       let caseEdges =  connectLists ([branchNode], caseHeads)
 
       let endEdges = connectLists (caseTails, ourTail)
 
-      return $ (Map.insert (getLabel e) ourHead headMap
-        ,Map.insert (getLabel e) ourTail tailMap --Last thing is tail statement of whichever case we take
+      return $ (IntMap.insert (getLabel e) ourHead headMap
+        ,IntMap.insert (getLabel e) ourTail tailMap --Last thing is tail statement of whichever case we take
         --,[Assign (IntermedExpr $ getLabel caseExpr) caseExpr] ++ caseNodes ++ subNodes
          ,subEdges ++ caseEdges ++ endEdges ++ branchEdges)
     Let defs body -> do
@@ -301,7 +308,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let defAssigns = map getDefAssigns orderedDefs
       --let bodyAssigns = map (tailAssign $ getLabel e) $ tailExprs body
 
-      let (ourHead:otherHeads) = map (\(GenericDef _ b _) -> headMap `mapGet` (getLabel b)) orderedDefs
+      let (ourHead:otherHeads) = map (\(GenericDef _ b _) -> headMap IntMap.! (getLabel b)) orderedDefs
 
       let lastDefs = map  (\defList->[last defList] ) defAssigns
       let firstDefs = map (\defList->[head defList] ) defAssigns
@@ -312,10 +319,10 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       --let otherHeads = tail allHeads
       --TODO separate variables?
 
-      let bodyHead = headMap `mapGet` (getLabel body)
-      let tailLists = map (tailMap `mapGet`) $ map (\(GenericDef _ rhs _) -> getLabel rhs) orderedDefs
+      let bodyHead = headMap IntMap.! (getLabel body)
+      let tailLists = map (tailMap IntMap.!) $ map (\(GenericDef _ rhs _) -> getLabel rhs) orderedDefs
 
-      let bodyTail = tailMap `mapGet` (getLabel body)
+      let bodyTail = tailMap IntMap.! (getLabel body)
       let ourTail = [Assign (IntermedExpr (getLabel e)) body]
 
       let betweenDefEdges =
@@ -327,8 +334,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
 
       --TODO need intermediate?
 
-      return $ (Map.insert (getLabel e) ourHead headMap
-                ,Map.insert (getLabel e) ourTail tailMap
+      return $ (IntMap.insert (getLabel e) ourHead headMap
+                ,IntMap.insert (getLabel e) ourTail tailMap
                 --,defAssigns ++ bodyAssigns ++ subNodes
                 ,subEdges ++ betweenDefEdges
                  ++ tailToDefEdges ++ interDefEdges ++ assignExprEdges)
@@ -338,19 +345,19 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
         
         let ourHead = [ExprEval e]
         let ourTail = ourHead
-        return (Map.insert (getLabel e) ourHead headMap,
-                Map.insert (getLabel e) ourTail tailMap,
+        return (IntMap.insert (getLabel e) ourHead headMap,
+                IntMap.insert (getLabel e) ourTail tailMap,
                 subEdges) --Means we are a leaf node, no sub-expressions
       _ ->  (trace "In fallthrough version of getEdges" ) $ do
         --TODO need each sub-exp?
         let subExprs = (directSubExprs e) :: [LabeledExpr]
-        let subHeads = trace ("Sub Expressions: " ++ show subExprs ) $ map (\ex -> headMap `mapGet` (getLabel ex)) subExprs
-        let subTails = map (\ex -> tailMap `mapGet` (getLabel ex)) subExprs
-        let ourHead = trace ("Sub heads " ++ show subHeads ++ "\nsub tails " ++ show subTails) $ head subHeads
+        let subHeads =  map (\ex -> headMap IntMap.! (getLabel ex)) subExprs
+        let subTails = map (\ex -> tailMap IntMap.! (getLabel ex)) subExprs
+        let ourHead = head subHeads
         let ourTail = trace ("Sub edges " ++ show subEdges ) $ last subTails
         let subExpEdges = concatMap connectLists $ zip (init subTails) (tail subHeads)
-        return (Map.insert (getLabel e) ourHead headMap
-              , Map.insert (getLabel e) ourTail tailMap
+        return (IntMap.insert (getLabel e) ourHead headMap
+              , IntMap.insert (getLabel e) ourTail tailMap
                --, subNodes
                , subEdges ++ subExpEdges) 
         --Other cases don't generate control nodes for one-level analysis
@@ -362,8 +369,8 @@ allDefEdges
   :: Map.Map Var FunctionInfo
   -> LabelDef
   -> Maybe (
-    Map.Map Label [ControlNode],
-    Map.Map Label [ControlNode],
+    IntMap.IntMap [ControlNode],
+    IntMap.IntMap [ControlNode],
     [(ControlNode, ControlNode)] )
 allDefEdges fnInfo d@(GenericDef pat body ty) =
   if (isStateMonadFn ty)
@@ -374,8 +381,8 @@ allExprEdges
   :: Map.Map Var FunctionInfo
   -> LabeledExpr
   -> Maybe (
-    Map.Map Label [ControlNode],
-    Map.Map Label [ControlNode],
+    IntMap.IntMap [ControlNode],
+    IntMap.IntMap [ControlNode],
     [(ControlNode, ControlNode)] )
 allExprEdges fnInfo e = foldE
            (\ _ () -> repeat ())
@@ -388,8 +395,8 @@ nameToCanonVar :: String -> Var
 nameToCanonVar name = Variable.Canonical  Variable.Local name
 
 functionDefEdges
-  :: (Map.Map Label [ControlNode]
-    ,Map.Map Label [ControlNode])
+  :: ( IntMap.IntMap [ControlNode]
+    , IntMap.IntMap [ControlNode])
   -> LabelDef
   -> Maybe [ControlEdge]
 functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label,_) _) _ty ) = trace "Getting Function Edges " $ do
@@ -401,7 +408,7 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   let ourHead = ProcEntry e
   let ourTail = [ProcExit e]
   let bodyTails = tailExprs body
-  let tailNodes = concatMap (\e -> tailMap `mapGet` (getLabel e) ) bodyTails
+  let tailNodes = concatMap (\e -> tailMap  IntMap.! (getLabel e) ) bodyTails
   let assignReturns = [AssignParam
                         (FormalReturn (nameToCanonVar name) )
                         (IntermedExpr $ getLabel body) body]
@@ -410,11 +417,11 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
            (pat,argLab) <- argPatLabels, v <- getPatternVars pat]
   let (startEdges, assignFormalEdges, gotoBodyEdges) =
         case argPats of
-          [] -> (connectLists([ourHead], headMap `mapGet` (getLabel body)),
+          [] -> (connectLists([ourHead], headMap  IntMap.! (getLabel body)),
                 [], [])
           _ -> ([(ourHead, head assignParams )],
               zip (init assignParams) (tail assignParams),
-              connectLists ([last assignParams], headMap `mapGet` (getLabel body)))
+              connectLists ([last assignParams], headMap  IntMap.! (getLabel body)))
   let assignReturnEdges = connectLists (tailNodes, assignReturns)
   let fnExitEdges = connectLists (assignReturns, ourTail)
 
@@ -428,8 +435,8 @@ monadicDefEdges
   :: Map.Map Var FunctionInfo
   -> LabelDef
   -> Maybe (
-    Map.Map Label [ControlNode],
-    Map.Map Label [ControlNode],
+    IntMap.IntMap [ControlNode],
+    IntMap.IntMap [ControlNode],
     [(ControlNode, ControlNode)] )
 monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
   let body = functionBody e
@@ -441,8 +448,8 @@ monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
   let linkStatementEdges (stmtInfo1, (pat,andThenExpr), stmtInfo2) = do
         let (s1, (_, tailMap1, _)) = stmtInfo1
         let (s2, (headMap2, _, _)) = stmtInfo2
-        let s1Tail = tailMap1 `mapGet` (getLabel s1)
-        let s2Head = headMap2 `mapGet` (getLabel s2)
+        let s1Tail = tailMap1 IntMap.! (getLabel s1)
+        let s2Head = headMap2 IntMap.! (getLabel s2)
         --TODO is this the right label?
         let assignParamNode = AssignParam (FormalParam pat (getLabel s2)) (IntermedExpr (getLabel s1)) andThenExpr
         return $  (connectLists (s1Tail, [assignParamNode] )) ++ (connectLists ([assignParamNode], s2Head))
@@ -450,9 +457,9 @@ monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
   let stmtsAndNodes = zip allStmts statementNodes
   let edgeTriples =  zip3 (init stmtsAndNodes) patternLabels (tail stmtsAndNodes)
   let betweenStatementEdges = concatMap linkStatementEdges edgeTriples
-  let combinedHeads = Map.unions $ map (\(hmap,_,_) -> hmap) statementNodes
-  let combinedTails = Map.unions $ map (\(_, tmap, _) -> tmap) statementNodes
-  let lastStatementTails = combinedTails `mapGet` (getLabel $ lastStmt )
+  let combinedHeads = IntMap.unions $ map (\(hmap,_,_) -> hmap) statementNodes
+  let combinedTails = IntMap.unions $ map (\(_, tmap, _) -> tmap) statementNodes
+  let lastStatementTails = combinedTails IntMap.! (getLabel $ lastStmt )
   let ourTails =
         [AssignParam
          (IntermedExpr (getLabel body))
@@ -460,9 +467,9 @@ monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
          e]
   let finalAssignEdges = connectLists(lastStatementTails, ourTails)
   let newHeads =
-        Map.insert (getLabel body) (combinedHeads `mapGet` (getLabel $ head allStmts)) combinedHeads
+        IntMap.insert (getLabel body) (combinedHeads IntMap.! (getLabel $ head allStmts)) combinedHeads
   let newTails =
-        Map.insert (getLabel body) ourTails combinedTails
+        IntMap.insert (getLabel body) ourTails combinedTails
   return $ (newHeads,
            newTails,
            finalAssignEdges ++ concat betweenStatementEdges
@@ -549,15 +556,15 @@ isSpecialFn v = trace ("!!!! Is Special?" ++ (show $ Var.name v) ) $ Set.member 
 
 specialFnEdges
   :: Map.Map Var FunctionInfo
-  -> (Map.Map Label [ControlNode], Map.Map Label [ControlNode])
+  -> (IntMap.IntMap [ControlNode], IntMap.IntMap [ControlNode])
   -> LabeledExpr
-  -> Maybe (Map.Map Label [ControlNode], Map.Map Label [ControlNode], [ControlEdge])
+  -> Maybe (IntMap.IntMap [ControlNode], IntMap.IntMap [ControlNode], [ControlEdge])
 specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
   fnName <- functionName e
   argList <- argsGiven e
-  let firstHead = (headMap `mapGet` (getLabel $ head argList))
-  let otherHeads = map (\arg -> headMap `mapGet` (getLabel $ arg) ) $ tail argList
-  let tailLists = map (\arg -> tailMap `mapGet` (getLabel $ arg) )  argList
+  let firstHead = (headMap IntMap.! (getLabel $ head argList))
+  let otherHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) $ tail argList
+  let tailLists = map (\arg -> tailMap IntMap.! (getLabel $ arg) )  argList
   let argNodes = paramNodes argList
   let assignParamEdges = concatMap connectLists $ zip tailLists argNodes
   let calcNextParamEdges = concatMap connectLists $ zip (init argNodes) otherHeads
@@ -581,9 +588,9 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
          return [AssignParam (IntermedExpr $ getLabel e) (FormalReturn stateFnName) e]
       _ -> trace "Error for special edges" $ Nothing
   --TODO connect our tail to the params tail
-  let goToTailEdges = connectLists (tailMap `mapGet` (getLabel $ last argList), ourTail)
-  return (Map.insert (getLabel e) firstHead headMap,
-          Map.insert (getLabel e) ourTail tailMap,
+  let goToTailEdges = connectLists (tailMap  IntMap.! (getLabel $ last argList), ourTail)
+  return (IntMap.insert (getLabel e) firstHead headMap,
+          IntMap.insert (getLabel e) ourTail tailMap,
           assignParamEdges ++ calcNextParamEdges ++ goToTailEdges)
 
 
