@@ -21,7 +21,7 @@ import           Optimize.Types
 import qualified Elm.Compiler.Module        as PublicModule
 import qualified Data.IntMap as IntMap
 
-
+import Data.Char (isUpper)
 
 import qualified AST.Type                   as Type
 import Data.Hashable
@@ -176,11 +176,15 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
     App e1 _ -> trace "App case" $ do
       fnName <- functionName e1
       argList <- argsGiven e
-      case (isSpecialFn fnName) of
-        True -> do
+      case (isSpecialFn fnName, isCtor fnName) of
+        (True, False) -> do
           (newHeads, newTails, specialEdges) <- specialFnEdges fnInfo (headMap, tailMap) e
           return (newHeads, newTails, subEdges ++ specialEdges)
-        False -> do
+        (False, True) -> case (headMaps) of
+          [] -> leafStatement (headMap, tailMap) subEdges e
+          _ -> intermedStatement (headMap, tailMap) subEdges e
+          
+        _ -> do
           let numArgs = length argList
           let mThisFunInfo = Map.lookup fnName fnInfo
           case (mThisFunInfo) of
@@ -231,30 +235,13 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
                 --And hope we'll find the full application further up in the tree
                 (False, False) -> return $ (headMap, tailMap, subEdges)
 
-                _ -> Nothing
+                _ -> trace "Bad Fn App " Nothing
             --If function is locally defined, or not fully instantiated, we fail
     Lambda _ _ -> trace "!!!Lambda def" $  Nothing
     Binop op e1 e2 -> case (isArith op) of
-      True -> case (headMaps) of --If arithmetic, treat like a normal expression, doesn't change control flow
-         [] -> (trace "Leaf case" ) $ do
-        
-           let ourHead = [ExprEval e]
-           let ourTail = ourHead
-           return (IntMap.insert (getLabel e) ourHead headMap,
-                   IntMap.insert (getLabel e) ourTail tailMap,
-                   subEdges) --Means we are a leaf node, no sub-expressions
-         _ ->  (trace "In fallthrough version of getEdges" ) $ do
-           --TODO need each sub-exp?
-           let subExprs = (directSubExprs e) :: [LabeledExpr]
-           let subHeads = map (\ex -> headMap IntMap.! (getLabel ex)) subExprs
-           let subTails = map (\ex -> tailMap IntMap.! (getLabel ex)) subExprs
-           let ourHead = trace ("Sub heads " ++ show subHeads ++ "\nsub tails " ++ show subTails) $ head subHeads
-           let ourTail = trace ("Sub edges " ++ show subEdges ) $ last subTails
-           let subExpEdges = concatMap connectLists $ zip (init subTails) (tail subHeads)
-           return (IntMap.insert (getLabel e) ourHead headMap
-                 , IntMap.insert (getLabel e) ourTail tailMap
-                  --, subNodes
-                  , subEdges ++ subExpEdges)  --Arithmetic doesn't need its own statements, since we can do inline
+      True -> case (headMaps) of
+        [] -> leafStatement (headMap, tailMap) subEdges e
+        _ -> intermedStatement (headMap, tailMap) subEdges e  --Arithmetic doesn't need its own statements, since we can do inline
       False -> oneLevelEdges fnInfo (binOpToFn e) maybeSubInfo
     --Data _ args -> paramNodes args --Ctor is a constant, so just evaluate the arguments
     MultiIf condCasePairs -> do
@@ -350,14 +337,20 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
                  ++ tailToDefEdges ++ interDefEdges ++ assignExprEdges)
 
     _ -> (trace "Fallthrough" ) $ case (headMaps) of
-      [] -> (trace "Leaf case" ) $ do
-        
+      [] -> leafStatement (headMap, tailMap) subEdges e
+      _ -> intermedStatement (headMap, tailMap) subEdges e
+
+--TODO doc each case
+
+leafStatement (headMap, tailMap) subEdges e = trace "Leaf Statement" $ do
         let ourHead = [ExprEval e]
         let ourTail = ourHead
         return (IntMap.insert (getLabel e) ourHead headMap,
                 IntMap.insert (getLabel e) ourTail tailMap,
                 subEdges) --Means we are a leaf node, no sub-expressions
-      _ ->  (trace "In fallthrough version of getEdges" ) $ do
+
+
+intermedStatement (headMap, tailMap) subEdges e = trace "Intermed Statement" $ do
         --TODO need each sub-exp?
         let subExprs = (directSubExprs e) :: [LabeledExpr]
         let subHeads =  map (\ex -> headMap IntMap.! (getLabel ex)) subExprs
@@ -368,12 +361,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
         return (IntMap.insert (getLabel e) ourHead headMap
               , IntMap.insert (getLabel e) ourTail tailMap
                --, subNodes
-               , subEdges ++ subExpEdges) 
-        --Other cases don't generate control nodes for one-level analysis
-        --For control flow, we just calculate each sub-expression in sequence
-        --We connect the end nodes of each sub-expression to the first of the next
+               , subEdges ++ subExpEdges)
 
---TODO doc each case
 
 {-|
 Given a top-level definition, traverse the expression for that definition
@@ -668,6 +657,14 @@ arithVars = [
   ,Variable.Canonical (Variable.Module ["Basics"]) "/="
             ]
 
+makeCtorType :: String -> [String] -> String -> [Type.CanonicalType] -> Type.CanonicalType
+makeCtorType typeName typeVars ctorName ctorArgs =
+  foldr addArg endType ctorArgs
+    where
+      addArg arg tySoFar = Type.Lambda arg tySoFar
+      canonVars = map (\s -> Type.Var $ s) typeVars
+      endType = Type.App (Type.Type $ nameToCanonVar typeName) canonVars
+
 {-|
 Given the interfaces for modules which have ben imported, whose code we don't have
 access to, look at the definitions and construct the function information
@@ -678,7 +675,9 @@ interfaceFnInfo interfaces = let
     nameIfaces = Map.toList interfaces
     nameSets = [(extModName, fnName, iface) | (extModName, iface) <- nameIfaces,
                                      (Var.Value fnName) <- Module.iExports iface]
-  in Map.fromList $ map (\(extModName, fnName, iface)  -> let
+    
+  in Map.fromList $ map
+     (\(extModName, fnName, iface)  -> let
                        fnTy = (Module.iTypes iface) `mapGet` fnName
                        fnArity = tyArity fnTy
                        (Name modStrings) = extModName
@@ -690,3 +689,8 @@ interfaceFnInfo interfaces = let
                        entryNode = ExternalCall varName fParams, -- :: ControlNode,
                        exitNode = ExternalCall varName fParams, -- :: ControlNode,
                        topFnLabel = Nothing })) nameSets
+
+-- |If a function name starts with a capital letter, it's a constructor
+-- | So we don't do anything control flowy, we just package the values
+isCtor :: Var -> Bool
+isCtor v = isUpper (head $ Var.name v)  

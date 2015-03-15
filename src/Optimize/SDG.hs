@@ -100,7 +100,7 @@ transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = ca
         possibleEnds = [ldom | ldom <- domain, (take contextDepth (lc:ldom)) == (lc:d') ]
       in joinAll lat [pl dPoss | dPoss <- possibleEnds]) )
   SDGFunction (Return fn l) -> let
-      (EmbPayload (domain2, lcall)) = resultDict Map.! (SDGFunction $ Call l)
+      (EmbPayload (domain2, lcall)) = trace "Map1" $ resultDict Map.! (SDGFunction $ Call l)
     in EmbPayload (domain,  \d ->
      (lcall d) `latticeJoin` (pl ((SDGFunction $ Call l):d) ) )
   _ -> lhat
@@ -257,7 +257,7 @@ monadRemoveStatements  targetNodes reachedNodesMap monadBody = trace "!!!MonadRe
                                      (SDGDef var compLab)<-Map.keys reachedNodesMap,
                                      compLab == getLabel stmt]--TODO make faster
            reachedNodes = Set.unions $ map
-             (\varNode -> case (reachedNodesMap Map.! varNode) of
+             (\varNode -> case (trace "Map2" $ reachedNodesMap Map.! varNode) of
                     x -> unSDG x) ourAssigns
            isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
          in isRel ) patStatements
@@ -277,8 +277,9 @@ defIsRelevant defLabel targetNodes reachedNodesMap (GenericDef pat expr _ty) = l
         definedVarPlusses = map (\v -> NormalVar v defLabel) definedVars
         nodesForDefs = map (\var -> SDGDef var (getLabel expr)) definedVarPlusses
         reachedNodes = Set.unions $
-          map (\varNode -> case (reachedNodesMap Map.! varNode) of
-                  x -> unSDG x) nodesForDefs
+          map (\varNode -> case (Map.lookup varNode reachedNodesMap ) of
+                  Just x -> unSDG x
+                  Nothing -> Set.empty) nodesForDefs
                   -- EmbPayload _ lhat -> unSDG $ lhat []) nodesForDefs
         isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
       in isRel

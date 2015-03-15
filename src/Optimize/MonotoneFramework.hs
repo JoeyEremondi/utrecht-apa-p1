@@ -110,7 +110,7 @@ minFP :: (Hashable label, Eq label, Show label, Show payload) =>
          -> (Map.HashMap label payload, Map.HashMap label payload)
 minFP lat@(Lattice{..}) f info = trace ("In MinFP" ++ show (length $ labelPairs info) ) $ (mfpOpen, mfpClosed)
   where
-    mfpClosed = Map.mapWithKey (f mfpOpen) mfpOpen
+    mfpClosed = trace "MinFP finished" $ Map.mapWithKey (f mfpOpen) mfpOpen
     --stResult :: ST s [(label, payload)]
     initialSolns = foldr (\l solnsSoFar ->
                              if isExtremal info l

@@ -125,7 +125,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
         !ourLat = embellishedRD domain  iotaVal
         --ourLat = reachingDefsLat iotaVal
         --(_, theDefsHat) = minFP ourLat transferFun pinfo
-        (_, !theDefsHat) = minFP ourLat (liftedTransfer iotaVal) pinfo
+        (_, !theDefsHat) = trace "Got MinFP defs" minFP ourLat (liftedTransfer iotaVal) pinfo
         theDefs = Map.map (\(EmbPayload (_, lhat)) -> lhat []) theDefsHat
         --theDefs = trace ("!!!!!Reaching (not relevant) defs: " ++ show theDefsHat ) $ theDefsHat
         relevantDefs = trace ("\n\nTheDefs \n\n" ++ (show theDefs) ++ "\n\n\n" ) $ Map.mapWithKey
@@ -133,7 +133,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
                          HSet.filter (isExprRef fnInfo expDict x) s) theDefs
       in trace ("\n\nRelevant Defs \n\n" ++ show relevantDefs )$ Just (pinfo, relevantDefs, targetNodes)
 
--- | Useful for debuggin
+-- | Useful for debugging
 instance Show (ProgramInfo LabelNode) where
   show (ProgramInfo { edgeMap = pinfo_edgeMap,
                       allLabels = pinfo_allLabels,
