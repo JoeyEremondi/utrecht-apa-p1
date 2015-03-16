@@ -265,31 +265,57 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
     --patLabels = map snd patStatements
     --allStatements = (map fst patStatements) ++ [lastStmt]
 
-    cleanMonadic taskStruct = case taskStruct of
-      TSeq expr s1 _ s2 -> if (isRelevantStmt s1) then taskStruct else (cleanMonadic s2)
+    cleanMonadic taskStruct = trace "Clean monadic" $ case taskStruct of
+      TSeq expr s1 pat s2 -> if (isRelevantStmt  s1 )
+                            then TSeq expr (cleanMonadic s1) pat (cleanMonadic s2)
+                            else (cleanMonadic s2)
       TCase expr e cases -> TCase expr e $ map (\(p,s) -> (p, cleanMonadic s)) cases
       TBranch expr guardCases -> TBranch expr $ map (\(g,s) -> (g, cleanMonadic s)) guardCases
       _ -> taskStruct
 
-    isRelevantStmt t = case t of
-      Task s -> isRelevant s
-      TSeq _ _ _ _  -> True
-      TCase expr e cases -> or $ map isRelevantStmt $ map snd cases
-      TBranch expr cases -> or $ map isRelevantStmt $ map snd cases
-      TCall _ expr -> True --TODO more fine grained?
+    
+    isRelevantStmt t = trace "Is Relevant?" $ case t of
+      Task s -> trace ("Is rel stmt? " ++ show ( writeIsRelevant  (getLabel s) ) ) $ writeIsRelevant  (getLabel s)
+      TSeq exp s1 pat s2  -> trace ("Is rel result? " ++ show (resultIsRelevant pat (getLabel exp) )) $  (resultIsRelevant pat (getLabel exp) ) ||
+        (isRelevantStmt  s1) || (isRelevantStmt s2)
+      TCase expr e cases -> trace "TCase rel" $ or $ map (isRelevantStmt ) $ map snd cases
+      TBranch expr cases -> trace "IfCase rel" $ or $ map (isRelevantStmt ) $ map snd cases
+      TCall _ expr -> trace "Call rel" $ True --TODO more fine grained? 
       
 
-    isRelevant stmt =
+    writeIsRelevant  label =
       let
           --TODO check, is this right? Why don't we look at pattern?
-           ourAssigns = [(SDGDef var compLab) |
+           --definedVars =  getPatternVars `fmap` maybePat
+           --patAssigns =[SDGDef (NormalVar var label) label | var <- definedVars]
+           ourAssigns =  
+             [(SDGDef var compLab) |
                                      (SDGDef var compLab)<-Map.keys reachedNodesMap,
-                                     compLab == getLabel stmt]--TODO make faster
+                                     compLab == label]
+           --ourAssigns = [(SDGDef var compLab) |
+           --                          (SDGDef var compLab)<-Map.keys reachedNodesMap,
+           --                          compLab == getLabel stmt]--TODO make faster
            reachedNodes = Set.unions $ map
              (\varNode -> case (reachedNodesMap Map.! varNode) of
                     x -> unSDG x) ourAssigns
            isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
-       in isRel
+       in  trace ("Write relevant? " ++ show isRel ++ " " ++ show label  ++ "\nSets " ++ show reachedNodes ) $ isRel
+
+    resultIsRelevant pat label =
+      let
+          --TODO check, is this right? Why don't we look at pattern?
+           definedVars =  getPatternVars pat
+           --patAssigns =[SDGDef (NormalVar var label) label | var <- definedVars]
+           ourAssigns = [SDGDef (NormalVar var label) label | var <- definedVars]
+           --ourAssigns = [(SDGDef var compLab) |
+           --                          (SDGDef var compLab)<-Map.keys reachedNodesMap,
+           --                          compLab == getLabel stmt]--TODO make faster
+           reachedNodes = Set.unions $ map
+             (\varNode -> case (reachedNodesMap Map.! varNode) of
+                    x -> unSDG x) ourAssigns
+           isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
+       in  trace ("Result relevant? " ++ show isRel ++ " " ++ show label ++ " " ++ show pat ++ "\nSets " ++ show reachedNodes ) $ isRel
+           
     cleanedStmt = cleanMonadic taskStructure
     --Put our monadic statements back into functional form
     reAssembleSeq :: TaskStructure -> LabeledExpr

@@ -209,8 +209,11 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
             _ -> False
       case (isSpecialFn fnName, isCtor fnName, isExternal) of
         (True, False, _) -> do
-          (newHeads, newTails, specialEdges) <- specialFnEdges fnInfo (headMap, tailMap) e
-          return (newHeads, newTails, subEdges ++ specialEdges)
+          let specialFunResult = specialFnEdges fnInfo (headMap, tailMap) e
+          case specialFunResult of
+            Just (newHeads, newTails, specialEdges)  ->
+              return (newHeads, newTails, subEdges ++ specialEdges)
+            Nothing -> return (headMap, tailMap, subEdges)
         (False, True, _) -> case (headMaps) of
           [] -> leafStatement (headMap, tailMap) subEdges e
           _ -> intermedStatement (headMap, tailMap) subEdges e
@@ -573,6 +576,7 @@ monadStructureEdges fnInfo taskStruct = trace  "MonStrucEdg" $
             gInfo <- allExprEdges fnInfo g
             sInfo <- monadStructureEdges fnInfo s
             return (gInfo, sInfo)) guardStatementPairs
+      let branchNodes = map (\g -> [Branch g]) $ map fst guardStatementPairs
       let (headMap, tailMap, nonMonadEdges) =
             List.foldl' (\ (headSoFar, tailSoFar, edgesSoFar) (h1,t1,e1) ->
                      (IntMap.union headSoFar h1,
@@ -584,9 +588,10 @@ monadStructureEdges fnInfo taskStruct = trace  "MonStrucEdg" $
       let bodyTails = map (\(_,t,_,_,_) -> t) $ map snd infoList
       let subEdges = nonMonadEdges ++ ( concatMap (\(_,_,_,_,e) -> e) $ map snd infoList)
       let ourHead = head guardHeads
-      let guardToBodyEdges = concatMap connectLists $ zip guardTails bodyHeads
+      let guardToBranchEdges = concatMap connectLists $ zip guardTails branchNodes
+      let branchToBodyEdges = concatMap connectLists $ zip branchNodes bodyHeads
       --List should never be empty
-      let interGuardEdges = concatMap connectLists $ zip (init guardTails) (tail guardHeads)
+      let interGuardEdges = concatMap connectLists $ zip (init branchNodes) (tail guardHeads)
       let ourTails = concat bodyTails
       let (mHeadMaps, mTailMaps) = unzip $ map (\(_,_,h,t,_) -> (h,t)) $ map snd infoList
       let newHeadMap = IntMap.union headMap $ IntMap.unions mHeadMaps
@@ -596,7 +601,7 @@ monadStructureEdges fnInfo taskStruct = trace  "MonStrucEdg" $
               ourTails,
               IntMap.insert ourLabel ourHead newHeadMap,
               IntMap.insert ourLabel ourTails newTailMap,
-              subEdges ++ guardToBodyEdges ++ interGuardEdges)
+              subEdges ++ guardToBranchEdges ++ interGuardEdges ++ branchToBodyEdges)
     
     TCase ourExpr caseExp patStmtPairs -> trace ("TCase " ++ show taskStruct) $do
       let ourLabel = getLabel ourExpr
@@ -604,8 +609,10 @@ monadStructureEdges fnInfo taskStruct = trace  "MonStrucEdg" $
       ourHead <- labelLook headMap caseExp
       bodyTails <- labelLook tailMap caseExp
       infoList <- mapM (monadStructureEdges fnInfo) $ map snd patStmtPairs
+      let branchNode = [Branch ourExpr]
       let subEdges = nonMonadicEdges ++ (concatMap (\(_,_,_,_,e) -> e) infoList )
-      let gotoArmEdges = concatMap (\(h,_,_,_,_) -> connectLists (bodyTails, h)) infoList
+      let gotoBranchEdges = connectLists (bodyTails, branchNode)
+      let gotoArmEdges = concatMap (\(h,_,_,_,_) -> connectLists (branchNode, h)) infoList
       let ourTails = concatMap (\(_,t,_,_,_) -> t) infoList
       let (mHeadMaps, mTailMaps) = unzip $ map (\(_,_,h,t,_) -> (h,t)) infoList
       let newHeadMap = IntMap.union headMap $ IntMap.unions mHeadMaps
@@ -615,7 +622,7 @@ monadStructureEdges fnInfo taskStruct = trace  "MonStrucEdg" $
               ourTails,
               IntMap.insert ourLabel ourHead newHeadMap,
               IntMap.insert ourLabel ourTails newTailMap,
-              subEdges ++ gotoArmEdges)
+              subEdges ++ gotoArmEdges ++ gotoBranchEdges)
     --TODO get rid of call?
     TCall ourExpr app -> trace ("TCall " ++ show taskStruct) $ do
       let ourLabel = getLabel ourExpr
@@ -725,7 +732,7 @@ sequenceMonadic e@(A _ (Binop op e1 (A _ (Lambda pat body)) )) =
         headSeq = sequenceMonadic e1
       in TSeq e headSeq pat bodySeq
     _ -> Task e
-sequenceMonadic e@(A _ (App _ _)) = TCall e e
+--sequenceMonadic e@(A _ (App _ _)) = TCall e e
 sequenceMonadic e@(A _ (MultiIf guardCasePairs)) =
   TBranch e $ map (\(g, body) -> (g, (sequenceMonadic body))) guardCasePairs
 sequenceMonadic e@(A _ (Case caseExp patCasePairs)) =
@@ -784,13 +791,13 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
        (IntermedExpr $ getLabel e)
        (IntermedExpr (getLabel $ head argList))
        e]
-    "deRef" -> case (head argList) of
-        (A _ (Var ref)) -> return $ [AssignParam (IntermedExpr $ getLabel e) (Ref ref) e]
-        _ -> trace ("Error for special edges deRef" ++ show argList ) $ Nothing
-    "writeRef" -> case (head argList) of
-        (A _ (Var ref)) -> return $ [Assign (Ref ref) e]
+    "deRef" -> case argList of
+        [(A _ (Var ref))] -> return $ [AssignParam (IntermedExpr $ getLabel e) (Ref ref) e]
+        _ ->  Nothing
+    "writeRef" -> case argList of
+        [(A _ (Var ref)), otherArg] -> return $ [Assign (Ref ref) e]
         _ -> trace ("Error for special edges writeRef" ++ show argList ) Nothing
-    _ -> trace "Error for special edges" $ Nothing
+    _ -> Nothing
   --TODO connect our tail to the params tail
   let goToTailEdges = connectLists (last argTails, ourTail)
   return (IntMap.insert (getLabel e) firstHead headMap,

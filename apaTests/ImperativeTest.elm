@@ -16,7 +16,7 @@ basicStateTest x y =
     Nothing -> writeRef ref (4*newX))
       `andThen` \_ ->
   deRef ref
-
+{-
 stateFn : Int -> StateRef ph Int -> EState ph {}
 stateFn x ref =
   deRef ref `andThen` \oldVal -> 
@@ -30,9 +30,9 @@ stateFnCaller x =
   newRef 100 `andThen` \ref ->
   stateFn x ref `andThen` \_ ->
   deRef ref 
-
+-}
 main = 
   flow down
-    [ asText <| runState <| basicStateTest 10 (Just 20),
-      asText <| runState <| stateFnCaller 20
+    [ asText <| runState <| basicStateTest 10 (Just 20)
+      --, asText <| runState <| stateFnCaller 20
     ]
