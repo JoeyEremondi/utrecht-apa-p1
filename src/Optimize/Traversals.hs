@@ -73,6 +73,10 @@ tformEE cf ctxList ctx f@(_fa, fd, fv, _fe) expr = let
     --ctxList = cf exp ctx
     ctxTail = tail ctxList
     (ctx1:ctx2:_) = ctxList
+    makeCtxPairs l = case l of
+      [] -> []
+      (c1:c2:cRest) -> (c1,c2):(makeCtxPairs cRest)
+    ctxPairs = makeCtxPairs ctxList
   in case expr of
    (Literal l) -> Literal l
    (Var name) -> Var $ fv ctx name
@@ -81,8 +85,8 @@ tformEE cf ctxList ctx f@(_fa, fd, fv, _fe) expr = let
    (Binop op e1 e2) -> Binop (fv ctx op) (tformE cf ctx1 f e1) (tformE cf ctx2 f e2)
    (Lambda pat body) -> Lambda (tformP (fv ctx) pat) (tformE cf ctx1 f body)
    (App e1 e2) -> App (tformE cf ctx1 f e1) (tformE cf ctx2 f e2)
-   (MultiIf exprs) -> MultiIf $ map (\(c, (e1, e2)) -> (tformE cf c f e1, tformE cf c f e2))
-                      $ zip ctxList exprs
+   (MultiIf exprs) -> MultiIf $ map (\((c1, c2), (e1, e2)) -> (tformE cf c1 f e1, tformE cf c2 f e2))
+                      $ zip ctxPairs exprs
    (Let defs body) -> Let (map (\(c,d) -> fd c d)$ zip ctxTail defs) (tformE cf ctx1 f body)
    (Case e1 cases) -> Case (tformE cf ctx1 f e1) $ map
                       (\(c, (p,e)) -> (tformP (fv ctx) p, tformE cf c f e)) $ zip ctxTail cases
