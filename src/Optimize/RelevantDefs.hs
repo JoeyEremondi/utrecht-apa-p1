@@ -39,7 +39,7 @@ import           Debug.Trace                  (trace)
 
 --How long do we let our call strings be?
 contextDepth :: Int
-contextDepth = 0
+contextDepth = 2
 
 -- | Insert all of the given key-element pairs into a dictionary
 insertAll :: (Hashable k, Eq k) => [(k,a)] -> Map.HashMap k a -> Map.HashMap k a

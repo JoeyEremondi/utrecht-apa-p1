@@ -1,0 +1,228 @@
+\documentclass{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{amsthm}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+%\usepackage{algorithm2e}
+\usepackage[margin=1in]{geometry}
+%\usepackage{algorithm2e}
+%\usepackage{complexity}
+%\usepackage{graphicx}
+\usepackage{minted}
+\usepackage{multicol} % added package
+
+
+\title{APA Project 1: Monotone Frameworks\\
+Forward Slicing Dead Code Elimination in Elm}
+\author{Joseph Eremondi, UU\# 4229924}
+\date{\today}
+
+%\renewcommand{\thesubsection}{\thesection.\roman{subsection}}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem*{note}{Note}
+
+\newcommand\abs[1]{\left|#1\right|}
+
+\newcommand\set[1]{\left\{#1\right\}}
+
+\newcommand\sst[0]{\mid}
+
+\DeclarePairedDelimiter\floor{\lfloor}{\rfloor}
+
+%\newclass{\FPT}{FPT}
+
+
+\begin{document}
+
+\maketitle
+
+\section{Control Flow}
+
+One of the more challenging parts of this assignment was constructing the control-flow graph for a functional program.
+
+Central to my analysis is the idea of a ``tail'' expression, that is, a sub-expression which is a possible value for a larger expression. Function parameters, If-statement guards, and the matched expression in Case statements are never tail expressions, but most others are.
+
+For example TODO example.
+
+Roughly speaking, an expression is treated as a statement which calculates the value of the statement, then assigns that value to whatever (possibly internal) variable is waiting for it. In my implementation, the head and tail nodes of a sub-expression are stored in a dictionary, so that when calculating the generated edges for a node, we can connect it to the control nodes of its sub-expresssions without examining those expressions directly.
+
+Expressions or definitions which alter control flow in some way are represented as statements in the CFG. The generated nodes and edges are summarized below.
+
+\begin{itemize}
+\item
+  Function Definition: A function definition has ProcEntry and ProcExit nodes. The ProcEntry flows into assigning each formal parameter to its variable value, which then flows to the function body. After the body is calculated, its result is assigned to a ``return'' parameter. Control then flows to the ProcExit node.
+\item
+  Function Application: Each argument is calculated in sequence, and assigned to the formal parameter value. Control then flows to the call node, which is connected to the ProcEntry of the called function. The ProcExit of that function is connected to a Return node, which assigns the return value as the value of the application as a whole.
+\item
+  Binary Opearations: arithmetic operations do not alter control flow. Other binary operations are treated as function applications.
+\item
+  If Expressions: All Elm if-statements are represented as multi-way if statements, with multiple guards and values. Each guard has a CFG edge to both the head of the next guard, and the head of its value. Tail expressions are the tails of each case body.
+\item
+  Case Expressions: Similar to If. The expression being matched is evaluated, and its value is assigned to an internal intermediate variable. There is then a CFG edge to each possible case. Tail expressions are the tails of each case body.
+\item
+  Let Expressions: Elm Let expressions are recursively scoped. Since functions are not allowed in our analysis, there can be no mutually-recursive definitions of the program halts. Let-expressions are thus sorted into a topological ordering. The right-hand-side value of each expression is evaluated, and its value assigned to each variable in the pattern on the left hand side. There are edges between the definitions (in order), with an edge from the last definition to the expression body. The value of the body is then assigned to the value of the Let-expression as a whole.
+\end{itemize}
+
+\section{The Analysis Performed}
+
+My modified Elm compiler performs dead code removal. Monotone Frameworks are used in two ways.
+
+\subsection{Reaching Definitions}
+
+First, Reaching Definition Analysis is performed. The analysis follows the dataflow equations given in TODO Cite, with some small modifications. TODO equations. First, the iota value has been changed to bottom. This is because, in Elm, variables are never undefined. Even in imperative, monadic code, an initial value must be given. Thus, there is never a point where a free variable has an undefined value. Secondly, the analysis has been made interprocedural, with the following lifted transfer functions: TODO equations Finally, after the fixed-point of the transfer function is found, we look at the reaching definitions for each expression, and remove definitions of variables not referenced in that expression.
+
+The result of this analysis is the set, for each program point, of relevant definitions: definitions whose values reach, and are used in, an expression.
+
+This analysis has the following properties:
+
+\begin{itemize}
+\item
+ \textit{Forwards:} the property of a definition being reaching flows forwards over control-flow edges 
+\item
+ \textit{Context-sensitive:} call-strings of fixed length are taking into account for interprocedural analysis 
+\item
+ \textit{Flow-sensitive:} TODO 
+\item
+ \textit{May:} the join in our lattice of results is simply set union.
+
+\end{itemize}
+
+\subsection{System Dependence Graph}
+
+The actual program slicing is performed using a System Dependence Graph. Each program point has a node in the SDG. An edge $(B,C)$ will be between nodes $B$ and $C$ for one of four reasons:
+\begin{itemize}
+\item $C$ is data-dependent on a variable that $B$ defines. That is, $B$ was a relevant definition in the result of our first analysis for $C$. 
+\item $C$ is control-dependent on $B$. TODO
+\item $B$ is a call node for function $f$, and $C$ is the Proc-entry node for $f$ 
+\item $B$ is the Proc-exit node for function $f$, and $C$ is the return node for a call to $f$
+\end{itemize} 
+
+A definition is then relevant if there is a path from that definition to a ``target node'' in the SDG. The target nodes are the Proc-exit nodes of all functions exported by the module under analysis, as well as the main function, if one is present.
+
+Once again, the analysis is lifted into an embellished lattice, so that a definition is relevant if there is a path to a target node which is valid with respect to function calls, for call strings of a given fixed length.
+
+The analysis has the following properties:
+
+\begin{itemize}
+\item \textit{Backwards:} relevance as a property flows backwards along SDG edges.
+\item \textit{Context-sensitive:} all-strings of fixed length are taking into account for interprocedural analysis.
+\item \textit{Flow-sensitive:} TODO
+\item \textit{May:} the lattice join operator is set union.
+\end{itemize}
+
+
+
+\section{Limitations}
+
+My analysis has the following limitations:
+
+\begin{itemize}
+\item
+  Higher order code and closures are not supported. The analysis fails if a function is applied to fewer than its full set of arguments, or if a lambda is ever encountered in code.
+\item
+  Imperative (monadic) code requires that references always be variables. This basically means that the analysis supports mutable variables, but not pointers/references.
+\item
+  The analysis is only applied within a module. External calls to pure functions are assumed to have no kills or gens. This is safe because Elm doesn't allow dependency cycles, meaning external calls can't refer to variables within our module. For external calls in monadic code, the kill-set is assumed to be empty, but the gen-set is assumed to contain all references passed to the function. This provides a safe over-approximation of which definitions reach given statements. TODO this
+\end{itemize}
+
+If the analysis fails at any point, the original module is returned, so the results should always be safe, if not optimal.
+
+\section{Code Structure}
+
+My changes are contained in the Optimize module, which did not exist previously in Elm. The modules contained there are:
+
+\begin{itemize}
+\item
+  Optimize.Optimize: Contains the list of optimizations to be performed, and performs then in sequence. Is mainly there to allow for more optimizations to be added in the future.
+\item
+  Optimize.Reachability: currently unused TODO
+\item
+  Optimize.Types: Types common to other modules, such as Labels for Expressions, annotations for expressions, etc.
+\item
+  Optimize.Traversals: Functions to either transform or fold over the AST for a program, as well as some useful utilities building on those functions, such as labelling program blocks.
+\item
+  Optimize.Environment: Methods for traversing ASTs and adding variables to a scoped environment, so that we can deal with conflicting names properly.
+\item
+  Optimize.MonotoneFramework: The abstract types for flow graphs and lattices, as well as an implementation of the worklist algorithm.
+\item
+  Optimize.ControlFlow: Functions which take an expression and generate the control flow nodes and edges, which are then used in Reaching Definitions analysis.
+\item
+  Optimize.EmbellishedMonotone: Functions which take lattice operations and return lifted operations for an embellished lattice, taking into account context. Also has code to generate all valid context strings of a given length from a module.
+\item
+  Optimize.RelevantDefs: performs reaching definition analysis to find out, for each expression, which definitions reach that expression and are used to calculate its value.
+\item
+  Optimize.SDG: contains the functions which, given reaching definition information, form the System Dependence Graph for a module. Edges are followed transitively using the worklist algorithm. Functions to remove irrelevant definitions from a module are also contained here.
+\end{itemize}
+
+The only other changes to the code are minor (i.e.~adding Show instances), and the addition of the optimization stage to Elm.Compiler.hs.
+
+\section{Examples}
+
+\subsection{Basic Syntax}
+
+Below is an Elm module, containing the main syntactic constructs of the language.
+Definitions that should be removed are named $vRel, vRel1$, etc. Those that should be removed are named
+$vNotRel$ and so on.
+
+\begin{multicols}{2}
+\inputminted{elm}{apaTests/SyntaxTest.elm}
+\end{multicols}
+
+Examining the JavaScript output of the original Elm compiler, and our modified version,
+we get the following diff:
+
+
+\begin{minted}[%mathescape,
+               %linenos,
+               %numbersep=5pt,
+               %gobble=2,
+               %frame=lines,
+               framesep=2mm]{udiff}
+            
+  30d29
+  <             var vNotRel1 = _L.fromArray([0]);
+  35,37d33
+  <          var vNotRel2 = A2($Basics._op["++"],
+  <          vRel4,
+  <          vRel1);
+  48,50d43
+  <          var vNotRel = {_: {}
+  <                        ,x: y
+  <                        ,y: x};
+  70d62
+  <       var vNotRel = vRel1 + vRel2;
+  76d67
+  <          var vNotRel = vRel1 + 10;
+  85d75
+  <          var vNotRel1 = x + z;
+  87d76
+  <          var vNotRel2 = vRel + vNotRel1;
+  92,95d80
+  <       var vNotRel = A3(multiArgFun,
+  <       5,
+  <       6,
+  <       7);
+  111,117d95
+  <          var vNotRel = function () {
+  <             switch (maybeX.ctor)
+  <             {case "Just": return maybeX._0;
+  <                case "Nothing": return 100;}
+  <             _U.badCase($moduleName,
+  <             "between lines 14 and 17");
+  <          }();
+  123,124d100
+  <          var vNotRel = _U.cmp(x,
+  <          10) < 0 ? $Maybe.Just(100) : $Maybe.Nothing;
+            
+               
+\end{minted}  
+
+By looking at this diff, we can see that the only lines removed are definitions of our irrelevant variables.          
+
+                    
+\end{document}
