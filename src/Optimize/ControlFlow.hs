@@ -87,6 +87,9 @@ mapGet m k = case Map.lookup k m of
   Nothing -> error $ "Couldn't find key " ++ (show k) ++ " in map " ++ (show $ Map.toList m )
   Just e -> e
 
+labelLook :: IntMap.IntMap a -> LabeledExpr -> Maybe a
+labelLook dict expr = IntMap.lookup (getLabel expr) dict
+
 {-|
 Information about each function defined in a module.
 We need to know this before we construct our control-flow graph.
@@ -195,10 +198,10 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
           let numArgs = length argList
           thisFunInfo <- Map.lookup fnName fnInfo
           let fnArity = arity thisFunInfo
-          let (ourHead:otherArgHeads) =
-                map (\argEx -> headMap IntMap.! (getLabel argEx)) argList
-          let argTails =
-                map (\argEx -> tailMap IntMap.! (getLabel argEx)) argList
+          (ourHead:otherArgHeads) <-
+                mapM (labelLook headMap) argList
+          argTails <-
+                mapM (labelLook tailMap) argList
           --let callNode = Call e
           --let retNode = Return fnName e
           --Generate assignment nodes for the actual parameters to the formals
@@ -217,8 +220,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
 
           --TODO separate labels for call and return?
           let ourTail = AssignParam (IntermedExpr label) (FormalReturn fnName)  e
-          let returnEdges = trace ("Args given " ++ show argList ++"\nArg head node " ++ show ourHead ++ "\nArgLookup " ++ (show $ headMap IntMap.! (getLabel $ head argList)) ++ "\n\nhead map\n" ++ show headMap ) $
-                [ (externalCallNode, ourTail)]
+          let returnEdges = [ (externalCallNode, ourTail)]
 
           case (fnArity == numArgs) of
                 (True) -> return $
@@ -244,10 +246,10 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
               let inLocalScope = case (Map.lookup fnName env) of
                     Nothing -> False
                     Just fnLab -> (Just fnLab) == (topFnLabel thisFunInfo)
-              let (ourHead:otherArgHeads) =
-                    map (\argEx -> headMap IntMap.! (getLabel argEx)) argList
-              let argTails =
-                    map (\argEx -> tailMap IntMap.! (getLabel argEx)) argList
+              (ourHead:otherArgHeads) <-
+                    mapM (labelLook headMap) argList
+              argTails <-
+                    mapM (labelLook tailMap) argList
               let callNode = Call e
               let retNode = Return fnName e
               --Generate assignment nodes for the actual parameters to the formals
@@ -267,8 +269,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
 
               --TODO separate labels for call and return?
               let ourTail = AssignParam (IntermedExpr label) (FormalReturn fnName)  e
-              let returnEdges = trace ("Args given " ++ show argList ++"\nArg head node " ++ show ourHead ++ "\nArgLookup " ++ (show $ headMap IntMap.! (getLabel $ head argList)) ++ "\n\nhead map\n" ++ show headMap ) $
-                    [ (fnExitNode, retNode)
+              let returnEdges = [ (fnExitNode, retNode)
                     ,(retNode, ourTail)
                     ]
                 --TODO add edges to function entry, assigning formals
@@ -301,11 +302,11 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let bodies = map snd condCasePairs
       --let bodyTails = concatMap tailExprs bodies
       --let guardNodes = map Branch guards
-      let bodyHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) bodies
-      let bodyTails = map (\bodyEx -> tailMap IntMap.! (getLabel bodyEx)) bodies
+      bodyHeads <- mapM (labelLook headMap) bodies
+      bodyTails <- mapM (labelLook tailMap) bodies
       --Each guard is connected to the next guard, and the "head" control node of its body
-      let (ourHead:otherGuardHeads) = map (\arg -> headMap IntMap.! (getLabel $ arg) ) guards
-      let guardTails = map (\arg -> tailMap IntMap.! (getLabel $ arg) ) guards
+      (ourHead:otherGuardHeads) <- mapM (labelLook headMap ) guards
+      guardTails <- mapM (labelLook tailMap ) guards
       --let notLastGuardEnds = init guardEnds
       
 
@@ -333,12 +334,13 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       --let ourHead = case (headMap `mapGet` (getLabel caseExpr)) of
       --      [] -> [Assign (IntermedExpr $ getLabel caseExpr) caseExpr]
       --      headList -> headList
-      let ourHead = headMap IntMap.! (getLabel caseExpr)
+      ourHead <- labelLook headMap caseExpr
 
-      let caseHeadNodes = concatMap (\cs -> headMap IntMap.! (getLabel cs) ) cases
-      let caseTailNodes = map (\caseBody -> tailMap IntMap.! (getLabel caseBody) ) cases
+      caseHeadNodes <- concat `fmap` mapM (labelLook tailMap ) cases
+      caseTailNodes <- mapM (labelLook  tailMap) cases
+      caseTails <- labelLook tailMap caseExpr
       let exprToBranchEdges =
-            connectLists (tailMap IntMap.! (getLabel caseExpr), [branchNode])
+            connectLists (caseTails, [branchNode])
       let branchToCaseEdges =  connectLists ([branchNode], caseHeadNodes)
 
       let toAssignEdges = concatMap connectLists $ zip caseTailNodes assignCaseValueNodes
@@ -360,17 +362,17 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let defAssigns = map getDefAssigns orderedDefs
       --let bodyAssigns = map (tailAssign $ getLabel e) $ tailExprs body
 
-      let (ourHead:otherHeads) =
-            map (\(GenericDef _ b _) -> headMap IntMap.! (getLabel b)) orderedDefs
-      let rhsDefTails =
-            map (\(GenericDef _ b _) -> tailMap IntMap.! (getLabel b)) orderedDefs
+      (ourHead:otherHeads) <-
+            mapM (\(GenericDef _ b _) -> labelLook headMap b) orderedDefs
+      rhsDefTails <-
+            mapM (\(GenericDef _ b _) -> labelLook tailMap b) orderedDefs
 
       let lastAssignInDefs = map  (\defList->[last defList] ) defAssigns
       let firstAssignInDefs = map (\defList->[head defList] ) defAssigns
 
-      let bodyHead = headMap IntMap.! (getLabel body)
+      bodyHead <- labelLook headMap body
 
-      let bodyTail = tailMap IntMap.! (getLabel body)
+      bodyTail <- labelLook tailMap body
       let ourTail = [Assign (IntermedExpr (getLabel e)) body]
 
       let defTailToFirstAssignEdges =
@@ -421,8 +423,8 @@ intermedStatement (headMap, tailMap) subEdges e =
   do
         --TODO need each sub-exp?
         let subExprs = (directSubExprs e) :: [LabeledExpr]
-        let subHeads =  map (\ex -> headMap IntMap.! (getLabel ex)) subExprs
-        let subTails = map (\ex -> tailMap IntMap.! (getLabel ex)) subExprs
+        subHeads <-  mapM (labelLook headMap) subExprs
+        subTails <- mapM (labelLook tailMap) subExprs
         let ourHead = head subHeads
         let ourTail = last subTails
         let subExpEdges = concatMap connectLists $ zip (init subTails) (tail subHeads)
@@ -492,8 +494,9 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   --let argVars = concatMap getPatternVars argPats
   let ourHead = ProcEntry e
   let ourTail = [ProcExit e]
+  bodyHead <- labelLook headMap body
   --let bodyTails = tailExprs body
-  let tailNodes =  tailMap IntMap.! (getLabel body) 
+  tailNodes <-  labelLook tailMap body 
   let assignReturns = [AssignParam
                         (FormalReturn (nameToCanonVar name) )
                         (IntermedExpr $ getLabel body) body]
@@ -502,11 +505,11 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
            (pat,argLab) <- argPatLabels, v <- getPatternVars pat]
   let (startEdges, assignFormalEdges, gotoBodyEdges) =
         case argPats of
-          [] -> (connectLists([ourHead], headMap  IntMap.! (getLabel body)),
+          [] -> (connectLists([ourHead], bodyHead),
                 [], [])
           _ -> ([(ourHead, head assignParams )],
               zip (init assignParams) (tail assignParams),
-              connectLists ([last assignParams], headMap  IntMap.! (getLabel body)))
+              connectLists ([last assignParams], bodyHead))
   let assignReturnEdges = connectLists (tailNodes, assignReturns)
   let fnExitEdges = connectLists (assignReturns, ourTail)
 
@@ -535,18 +538,19 @@ monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
   let linkStatementEdges (stmtInfo1, (pat,andThenExpr), stmtInfo2) = do
         let (s1, (_, tailMap1, _)) = stmtInfo1
         let (s2, (headMap2, _, _)) = stmtInfo2
-        let s1Tail = tailMap1 IntMap.! (getLabel s1)
-        let s2Head = headMap2 IntMap.! (getLabel s2)
+        s1Tail <- labelLook tailMap1 s1
+        s2Head <- labelLook headMap2  s2
         --TODO is this the right label?
         let assignParamNode = AssignParam (FormalParam pat (getLabel s2)) (IntermedExpr (getLabel s1)) andThenExpr
         return $  (connectLists (s1Tail, [assignParamNode] )) ++ (connectLists ([assignParamNode], s2Head))
 
   let stmtsAndNodes = zip allStmts statementNodes
   let edgeTriples =  zip3 (init stmtsAndNodes) patternLabels (tail stmtsAndNodes)
-  let betweenStatementEdges = concatMap linkStatementEdges edgeTriples
+  betweenStatementEdges <- concat `fmap` mapM linkStatementEdges edgeTriples
   let combinedHeads = IntMap.unions $ map (\(hmap,_,_) -> hmap) statementNodes
   let combinedTails = IntMap.unions $ map (\(_, tmap, _) -> tmap) statementNodes
-  let lastStatementTails = combinedTails IntMap.! (getLabel $ lastStmt )
+  lastStatementTails <- labelLook combinedTails lastStmt
+  ourHeads <- labelLook combinedHeads (head allStmts)
   let ourTails =
         [AssignParam
          (IntermedExpr (getLabel body))
@@ -554,12 +558,12 @@ monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
          e]
   let finalAssignEdges = connectLists(lastStatementTails, ourTails)
   let newHeads =
-        IntMap.insert (getLabel body) (combinedHeads IntMap.! (getLabel $ head allStmts)) combinedHeads
+        IntMap.insert (getLabel body) ourHeads combinedHeads
   let newTails =
         IntMap.insert (getLabel body) ourTails combinedTails
   return $ (newHeads,
            newTails,
-           finalAssignEdges ++ concat betweenStatementEdges
+           finalAssignEdges ++  betweenStatementEdges
              ++ concatMap (\(_,_,edges) -> edges) statementNodes)
 
 -- | Given the pattern of a definition's LHS
@@ -671,9 +675,8 @@ specialFnEdges
 specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
   fnName <- functionName e
   argList <- argsGiven e
-  let firstHead = (headMap IntMap.! (getLabel $ head argList))
-  let otherArgHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) $ tail argList
-  let argTails = map (\arg -> tailMap IntMap.! (getLabel $ arg) )  argList
+  (firstHead: otherArgHeads) <- mapM (labelLook headMap) argList
+  argTails <- mapM (labelLook tailMap)  argList
   --let argNodes = paramNodes argList
   --let assignParamEdges = concatMap connectLists $ zip tailLists argNodes
   let calcNextParamEdges = concatMap connectLists $ zip (init argTails) otherArgHeads
@@ -697,7 +700,7 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
          return [AssignParam (IntermedExpr $ getLabel e) (FormalReturn stateFnName) e]
       _ -> trace "Error for special edges" $ Nothing
   --TODO connect our tail to the params tail
-  let goToTailEdges = connectLists (tailMap  IntMap.! (getLabel $ last argList), ourTail)
+  let goToTailEdges = connectLists (last argTails, ourTail)
   return (IntMap.insert (getLabel e) firstHead headMap,
           IntMap.insert (getLabel e) ourTail tailMap,
           calcNextParamEdges ++ goToTailEdges) --TODO need assign param?
