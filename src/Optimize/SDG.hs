@@ -186,7 +186,7 @@ removeDeadCode initFnInfo targetVars e = case dependencyMap of
     dependencyMap = do
       (pinfo, targetNodes) <- sdgProgInfo initFnInfo targetVars eAnn
       let reachMap = callGraph eAnn
-      let fnLabels = Map.keys reachMap
+      let fnLabels = (Map.keys reachMap)
       let domain = map (\d -> map (\l -> SDGFunction (Call l)) d ) $ contextDomain fnLabels contextDepth reachMap
       let (_,embDefMap) =
             minFP --(forwardSliceLattice (Set.fromList targetNodes)) (\_ _ x -> x ) pinfo

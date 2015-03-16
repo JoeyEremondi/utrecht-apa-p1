@@ -136,7 +136,8 @@ callGraph (A _ (Let defs _)) =
       oneLevelCalls
 
     callMap = Map.fromList $ zip fnLabels $ map (\body -> allCalls body) fnBodies
-  in callMap
+    callMapWithExternal = Map.insert externalCallLabel [] callMap
+  in callMapWithExternal
 
 {-|
 Given the set of all labels in a program, a maximum call string length,
@@ -144,8 +145,9 @@ and the call-graph for a module,
 generate the list of all valid call strings, up to the given length.
 |-}
 contextDomain :: [Label] -> Int -> Map.HashMap Label [Label] -> [[Label]]
-contextDomain allLabels n callMap = helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
+contextDomain allLabels n callMap = helper n callMap ([[]] ++ map (\x -> [x]) allLabelsWithExt)
   where
+    allLabelsWithExt = [externalCallLabel] ++ allLabels
     helper 0 _ _ = [[]]
     helper 1 _ accum = accum
     helper n callMap accum = let

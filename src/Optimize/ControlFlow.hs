@@ -52,7 +52,7 @@ data ControlNode' expr =
   | ProcEntry (expr)
   | ProcExit (expr)
   | ExprEval (expr)
-  | ExternalCall Var [VarPlus]
+  | ExternalCall Var (expr)
   | ExternalStateCall Var [VarPlus]
     deriving (Functor, Eq, Ord, Show)
 
@@ -70,7 +70,7 @@ instance Hashable LabelNode where
 -- | or a "special" label if it represents an external function
 getNodeLabel :: ControlNode' Label -> Label
 getNodeLabel (Branch n) = n
-getNodeLabel (ExternalCall _ _) = externalCallLabel
+getNodeLabel (ExternalCall _ l) = l
 getNodeLabel (ExternalStateCall _ _) = externalCallLabel
 getNodeLabel (Assign _ n2) = n2
 getNodeLabel (AssignParam _ _ n2) = n2
@@ -96,8 +96,8 @@ data FunctionInfo =
   {
     arity        :: Int,
     formalParams :: [VarPlus],
-    entryNode    :: ControlNode,
-    exitNode     :: ControlNode,
+    entryNode    :: Maybe ControlNode,
+    exitNode     :: Maybe ControlNode,
     topFnLabel   :: Maybe Label
   } -- deriving (Eq, Ord, Show)
 
@@ -181,13 +181,56 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
     App e1 _ -> do
       fnName <- functionName e1
       argList <- argsGiven e
-      case (isSpecialFn fnName, isCtor fnName) of
-        (True, False) -> do
+      let isExternal = case (Var.home fnName) of
+            Var.Module _ -> True
+            _ -> False
+      case (isSpecialFn fnName, isCtor fnName, isExternal) of
+        (True, False, _) -> do
           (newHeads, newTails, specialEdges) <- specialFnEdges fnInfo (headMap, tailMap) e
           return (newHeads, newTails, subEdges ++ specialEdges)
-        (False, True) -> case (headMaps) of
+        (False, True, _) -> case (headMaps) of
           [] -> leafStatement (headMap, tailMap) subEdges e
           _ -> intermedStatement (headMap, tailMap) subEdges e
+        (False, False, True) -> do --non-special external call
+          let numArgs = length argList
+          thisFunInfo <- Map.lookup fnName fnInfo
+          let fnArity = arity thisFunInfo
+          let (ourHead:otherArgHeads) =
+                map (\argEx -> headMap IntMap.! (getLabel argEx)) argList
+          let argTails =
+                map (\argEx -> tailMap IntMap.! (getLabel argEx)) argList
+          --let callNode = Call e
+          --let retNode = Return fnName e
+          --Generate assignment nodes for the actual parameters to the formals
+          let assignFormalNodes =
+                map (\(formal, arg) ->
+                      Assign formal arg) $ zip (formalParams thisFunInfo) argList
+          --Control edges to generate
+          let externalCallNode = ExternalCall fnName e
+          let calcNextParamEdges =
+                concatMap connectLists $ zip (init argTails) otherArgHeads
+              
+          let gotoFormalEdges = connectLists (last argTails, [head assignFormalNodes])
+
+          let assignFormalEdges = zip (init assignFormalNodes) (tail assignFormalNodes)
+          let callEdges = [(last assignFormalNodes, externalCallNode )]
+
+          --TODO separate labels for call and return?
+          let ourTail = AssignParam (IntermedExpr label) (FormalReturn fnName)  e
+          let returnEdges = trace ("Args given " ++ show argList ++"\nArg head node " ++ show ourHead ++ "\nArgLookup " ++ (show $ headMap IntMap.! (getLabel $ head argList)) ++ "\n\nhead map\n" ++ show headMap ) $
+                [ (externalCallNode, ourTail)]
+
+          case (fnArity == numArgs) of
+                (True) -> return $
+                            (IntMap.insert (getLabel e) ourHead headMap,
+                             IntMap.insert (getLabel e) [ourTail] tailMap,
+                              --[callNode, retNode] ++ (concat argNodes),
+                             assignFormalEdges ++ calcNextParamEdges ++ assignFormalEdges ++
+                               gotoFormalEdges ++ callEdges ++
+                               callEdges ++ returnEdges ++ subEdges  ) --TODO app edges
+                --If we haven't applied all the arguments, we just do nothing
+                --And hope we'll find the full application further up in the tree
+                (False) -> return $ (headMap, tailMap, subEdges)
           
         _ -> do
           let numArgs = length argList
@@ -196,6 +239,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
             Nothing -> Nothing --Means we found a Native module, so don't optimize
             Just (thisFunInfo) -> do
               let fnArity = arity thisFunInfo
+              fnEntryNode <- entryNode thisFunInfo
+              fnExitNode <- exitNode thisFunInfo
               let inLocalScope = case (Map.lookup fnName env) of
                     Nothing -> False
                     Just fnLab -> (Just fnLab) == (topFnLabel thisFunInfo)
@@ -218,12 +263,12 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
 
               let assignFormalEdges = zip (init assignFormalNodes) (tail assignFormalNodes)
               let callEdges = [(last assignFormalNodes, callNode ),
-                              (callNode, entryNode thisFunInfo)]
+                              (callNode, fnEntryNode)]
 
               --TODO separate labels for call and return?
               let ourTail = AssignParam (IntermedExpr label) (FormalReturn fnName)  e
               let returnEdges = trace ("Args given " ++ show argList ++"\nArg head node " ++ show ourHead ++ "\nArgLookup " ++ (show $ headMap IntMap.! (getLabel $ head argList)) ++ "\n\nhead map\n" ++ show headMap ) $
-                    [ (exitNode thisFunInfo, retNode)
+                    [ (fnExitNode, retNode)
                     ,(retNode, ourTail)
                     ]
                 --TODO add edges to function entry, assigning formals
@@ -711,8 +756,8 @@ interfaceFnInfo interfaces = let
                      in (varName, FunctionInfo {
                        arity = fnArity,
                        formalParams = fParams, -- [VarPlus],
-                       entryNode = ExternalCall varName fParams, -- :: ControlNode,
-                       exitNode = ExternalCall varName fParams, -- :: ControlNode,
+                       entryNode = Nothing, -- :: ControlNode,
+                       exitNode = Nothing, -- :: ControlNode,
                        topFnLabel = Nothing })) nameSets
 
 -- |If a function name starts with a capital letter, it's a constructor
