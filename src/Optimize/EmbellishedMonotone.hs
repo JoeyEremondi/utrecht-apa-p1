@@ -97,7 +97,7 @@ liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload (dom
           possibleEnds = filter isGoodEnd domain
         in if (Call label == lc)
            then joinAll lat [lhat dPoss | dPoss <- possibleEnds]
-           else joinAll lat [lhat dPoss | dPoss <- possibleEnds]) --error "Invalid call string"
+           else latticeBottom) --error "Invalid call string"
 liftToFn _ _ _f fret resultMap rnode@(Return _ label) (EmbPayload (domain, lhat')) =
   let
     (EmbPayload (_, lhat)) = (resultMap Map.! (Call label) )

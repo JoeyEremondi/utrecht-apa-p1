@@ -178,7 +178,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
   let subEdges = concat subEdgesL
   case expr of
     --Function: we have call and return for the call, and evaluating each arg is a mock assignment
-    App e1 _ -> trace ("\n\n!!!!!!!!App case\n\n" ++ show e ) $ do
+    App e1 _ -> do
       fnName <- functionName e1
       argList <- argsGiven e
       case (isSpecialFn fnName, isCtor fnName) of
@@ -372,15 +372,16 @@ intermedStatement
                        -> Maybe (IntMap.IntMap [ControlNode],
                              IntMap.IntMap [ControlNode],
                              [ControlEdge])
-intermedStatement (headMap, tailMap) subEdges e = trace ("\n\n@@@@@@Intermed Statement " ++ show e ++ "\n\n" ++ "Intermediate head " ++ (show $head (directSubExprs e)) ++ "\n\nHeadMap " ++ show headMap ) $ do
+intermedStatement (headMap, tailMap) subEdges e =
+  do
         --TODO need each sub-exp?
         let subExprs = (directSubExprs e) :: [LabeledExpr]
         let subHeads =  map (\ex -> headMap IntMap.! (getLabel ex)) subExprs
         let subTails = map (\ex -> tailMap IntMap.! (getLabel ex)) subExprs
-        let ourHead = trace  ("@@@@ Intermediate head " ++ (show (getLabel e)) ++ " " ++ (show $head subHeads) ) $ head subHeads
-        let ourTail = trace ("Sub edges " ++ show subEdges ) $ last subTails
+        let ourHead = head subHeads
+        let ourTail = last subTails
         let subExpEdges = concatMap connectLists $ zip (init subTails) (tail subHeads)
-        return $ trace ("Adding intermed edges " ++ show subExpEdges ++ "\n\nSubExps:\n" ++ show subExprs) $
+        return 
           (IntMap.insert (getLabel e) ourHead headMap
               , IntMap.insert (getLabel e) ourTail tailMap
                --, subNodes
@@ -414,7 +415,8 @@ allExprEdges
     IntMap.IntMap [ControlNode],
     IntMap.IntMap [ControlNode],
     [(ControlNode, ControlNode)] )
-allExprEdges fnInfo e = trace ("\n\n\n\nTL Expression " ++ show e) $ foldE
+allExprEdges fnInfo e =
+  foldE
            (\ _ () -> repeat ())
            ()
            (\(GenericDef _ e v) -> [e])
