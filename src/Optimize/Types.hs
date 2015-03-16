@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances  #-}
+{-# LANGUAGE OverlappingInstances  #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module Optimize.Types where
 -- |A central place to put types and definitions
@@ -94,4 +95,3 @@ instance Pretty LabelDef where
                        Just tipe -> pretty pattern <+> P.colon <+> pretty tipe
 
 deriving instance Show LabelDef
-

@@ -178,7 +178,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
   let subEdges = concat subEdgesL
   case expr of
     --Function: we have call and return for the call, and evaluating each arg is a mock assignment
-    App e1 _ -> trace "App case" $ do
+    App e1 _ -> trace ("\n\n!!!!!!!!App case\n\n" ++ show e ) $ do
       fnName <- functionName e1
       argList <- argsGiven e
       case (isSpecialFn fnName, isCtor fnName) of
@@ -199,19 +199,20 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
               let inLocalScope = case (Map.lookup fnName env) of
                     Nothing -> False
                     Just fnLab -> (Just fnLab) == (topFnLabel thisFunInfo)
-              let (ourHead:otherArgHeads) = map (\argEx -> headMap IntMap.! (getLabel argEx)) argList
-              let argTails = map (\argEx -> tailMap IntMap.! (getLabel argEx)) argList
+              let (ourHead:otherArgHeads) =
+                    map (\argEx -> headMap IntMap.! (getLabel argEx)) argList
+              let argTails =
+                    map (\argEx -> tailMap IntMap.! (getLabel argEx)) argList
               let callNode = Call e
               let retNode = Return fnName e
               --Generate assignment nodes for the actual parameters to the formals
               let assignFormalNodes =
-                    map (\(formal, arg) -> Assign formal arg) $ zip (formalParams thisFunInfo) argList
+                    map (\(formal, arg) ->
+                          Assign formal arg) $ zip (formalParams thisFunInfo) argList
               --Control edges to generate
-              let firstHead = (headMap IntMap.! (getLabel $ head argList))
-              let otherHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) $ tail argList
 
               let calcNextParamEdges =
-                    concatMap connectLists $ zip (init argTails) (tail otherArgHeads)
+                    concatMap connectLists $ zip (init argTails) otherArgHeads
               
               let gotoFormalEdges = connectLists (last argTails, [head assignFormalNodes])
 
@@ -221,7 +222,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
 
               --TODO separate labels for call and return?
               let ourTail = AssignParam (IntermedExpr label) (FormalReturn fnName)  e
-              let returnEdges =
+              let returnEdges = trace ("Args given " ++ show argList ++"\nArg head node " ++ show ourHead ++ "\nArgLookup " ++ (show $ headMap IntMap.! (getLabel $ head argList)) ++ "\n\nhead map\n" ++ show headMap ) $
                     [ (exitNode thisFunInfo, retNode)
                     ,(retNode, ourTail)
                     ]
@@ -229,7 +230,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
           --TODO check for shadowing?
               case (fnArity == numArgs, inLocalScope) of
                 (True, False) -> return $
-                            (IntMap.insert (getLabel e) firstHead headMap,
+                            (IntMap.insert (getLabel e) ourHead headMap,
                              IntMap.insert (getLabel e) [ourTail] tailMap,
                               --[callNode, retNode] ++ (concat argNodes),
                              assignFormalEdges ++ calcNextParamEdges ++ assignFormalEdges ++
@@ -237,7 +238,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
                                callEdges ++ returnEdges ++ subEdges  ) --TODO app edges
                 --If we haven't applied all the arguments, we just do nothing
                 --And hope we'll find the full application further up in the tree
-                (False, False) -> return $ (headMap, tailMap, subEdges)
+                (False, False) -> trace ("^^^^^ Function pass over " ++ show headMap ) $ return $ (headMap, tailMap, subEdges)
 
                 _ -> trace "Bad Fn App " Nothing
             --If function is locally defined, or not fully instantiated, we fail
@@ -349,6 +350,13 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
 
 --TODO doc each case
 
+leafStatement
+    :: (IntMap.IntMap [ControlNode], IntMap.IntMap [ControlNode])
+                       -> [ControlEdge]
+                       -> LabeledExpr
+                       -> Maybe (IntMap.IntMap [ControlNode],
+                             IntMap.IntMap [ControlNode],
+                             [ControlEdge])
 leafStatement (headMap, tailMap) subEdges e = trace "Leaf Statement" $ do
         let ourHead = [ExprEval e]
         let ourTail = ourHead
@@ -356,16 +364,23 @@ leafStatement (headMap, tailMap) subEdges e = trace "Leaf Statement" $ do
                 IntMap.insert (getLabel e) ourTail tailMap,
                 subEdges) --Means we are a leaf node, no sub-expressions
 
-
-intermedStatement (headMap, tailMap) subEdges e = trace "Intermed Statement" $ do
+intermedStatement
+  :: (IntMap.IntMap [ControlNode], IntMap.IntMap [ControlNode])
+                       -> [ControlEdge]
+                       -> LabeledExpr
+                       -> Maybe (IntMap.IntMap [ControlNode],
+                             IntMap.IntMap [ControlNode],
+                             [ControlEdge])
+intermedStatement (headMap, tailMap) subEdges e = trace ("\n\n@@@@@@Intermed Statement " ++ show e ++ "\n\n" ++ "Intermediate head " ++ (show $head (directSubExprs e)) ++ "\n\nHeadMap " ++ show headMap ) $ do
         --TODO need each sub-exp?
         let subExprs = (directSubExprs e) :: [LabeledExpr]
         let subHeads =  map (\ex -> headMap IntMap.! (getLabel ex)) subExprs
         let subTails = map (\ex -> tailMap IntMap.! (getLabel ex)) subExprs
-        let ourHead = head subHeads
+        let ourHead = trace  ("@@@@ Intermediate head " ++ (show (getLabel e)) ++ " " ++ (show $head subHeads) ) $ head subHeads
         let ourTail = trace ("Sub edges " ++ show subEdges ) $ last subTails
         let subExpEdges = concatMap connectLists $ zip (init subTails) (tail subHeads)
-        return (IntMap.insert (getLabel e) ourHead headMap
+        return $ trace ("Adding intermed edges " ++ show subExpEdges ++ "\n\nSubExps:\n" ++ show subExprs) $
+          (IntMap.insert (getLabel e) ourHead headMap
               , IntMap.insert (getLabel e) ourTail tailMap
                --, subNodes
                , subEdges ++ subExpEdges)
@@ -398,7 +413,7 @@ allExprEdges
     IntMap.IntMap [ControlNode],
     IntMap.IntMap [ControlNode],
     [(ControlNode, ControlNode)] )
-allExprEdges fnInfo e = foldE
+allExprEdges fnInfo e = trace ("\n\n\n\nTL Expression " ++ show e) $ foldE
            (\ _ () -> repeat ())
            ()
            (\(GenericDef _ e v) -> [e])

@@ -25,6 +25,9 @@ import qualified AST.Variable             as Var
 import qualified Data.Map                 as Map
 import qualified Data.IntMap                 as IntMap
 
+import Debug.Trace (trace)
+import qualified Data.List as List
+
 
 import           Optimize.Types
 {-| 
@@ -77,7 +80,7 @@ tformEE cf ctxList ctx f@(_fa, fd, fv, _fe) expr = let
    (ExplicitList exprs) -> ExplicitList $ map (\(c,e) -> tformE cf c f e) $ zip ctxList exprs
    (Binop op e1 e2) -> Binop (fv ctx op) (tformE cf ctx1 f e1) (tformE cf ctx2 f e2)
    (Lambda pat body) -> Lambda (tformP (fv ctx) pat) (tformE cf ctx1 f body)
-   (App e1 e2) -> App (tformE cf ctx1 f e1) (tformE cf ctx1 f e2)
+   (App e1 e2) -> App (tformE cf ctx1 f e1) (tformE cf ctx2 f e2)
    (MultiIf exprs) -> MultiIf $ map (\(c, (e1, e2)) -> (tformE cf c f e1, tformE cf c f e2))
                       $ zip ctxList exprs
    (Let defs body) -> Let (map (\(c,d) -> fd c d)$ zip ctxTail defs) (tformE cf ctx1 f body)
@@ -216,7 +219,8 @@ makeListLabels
 makeListLabels init = tformE
   (\_ (l) -> map (\i -> [i]++l) [1..] )
   (init)
-  ( (\c a -> (a,c)), \lab -> tformDef (makeListLabels lab), cid, cid)
+  ( (\c a -> (a,c)), \lab -> tformDef (makeListLabels lab), cid,
+    \lab exp -> trace ("Giving label " ++ show lab ++ " to expr "  ) $ exp)
 
 {-|
 Given an expression, assign a unique integer label to each of its sub-expressions.
@@ -227,7 +231,7 @@ makeLabels
   -> Expr (a, Label) (GenericDef (a,Label) v) v
 makeLabels e =
   let
-    listLabeled = makeListLabels [] e
+    listLabeled = makeListLabels [1] e
     allLabels :: [[Int]]
     allLabels = foldE
       (\_ () -> repeat ())
@@ -235,7 +239,7 @@ makeLabels e =
       (\(GenericDef _ e v) -> [e])
       (\ _ (A (a,c) _) subs -> [c] ++  (concat subs))
       listLabeled
-    labelMap = Map.fromList $ zip allLabels [1..]
+    labelMap = trace ("Number of labels " ++ show (length allLabels) ++ " num unique " ++ show (length $ List.nub allLabels) ) $ Map.fromList $ zip allLabels [1..]
     switchToInt e = tformE
       (\ _ () -> repeat () )
       ()
