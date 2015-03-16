@@ -108,14 +108,16 @@ type LabelNode = ControlNode' Label
 type ControlEdge = (ControlNode, ControlNode)
 
 
-
+{-
 -- | For a fuction parameter, we treat each tail-position expression in the parameter
 -- | As an assignment to the actual value of that parameter
 paramNodes :: [LabeledExpr] -> [[ControlNode]]
 paramNodes = map (\ arg ->
                          map (\tailExpr ->
                            Assign (ActualParam $ getLabel arg) tailExpr ) $ tailExprs arg)
+-}
 
+{-
 -- | Get the expressions in "tail" position of an expression
 -- | These can be viewed as assignments to the value of the expression
 tailExprs :: LabeledExpr -> [LabeledExpr]
@@ -126,10 +128,13 @@ tailExprs wholeExp@(A _ e) = tailExprs' e
     tailExprs' (Let _ body) = tailExprs body
     tailExprs' _ = [wholeExp] --All other cases, the expression itself is the returned value, no control flow
 
+
 -- | Given a tail position expression, generate the control node
 -- | Representing its assigning a value to the expression
 tailAssign :: Label ->  LabeledExpr -> ControlNode
 tailAssign label tailExpr = Assign (IntermedExpr label) tailExpr
+-}
+
 
 -- | Convert a bin-op to a function call, since the difference is only syntactic
 binOpToFn :: LabeledExpr -> LabeledExpr
@@ -194,7 +199,8 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
               let inLocalScope = case (Map.lookup fnName env) of
                     Nothing -> False
                     Just fnLab -> (Just fnLab) == (topFnLabel thisFunInfo)
-              let argNodes = paramNodes argList
+              let (ourHead:otherArgHeads) = map (\argEx -> headMap IntMap.! (getLabel argEx)) argList
+              let argTails = map (\argEx -> tailMap IntMap.! (getLabel argEx)) argList
               let callNode = Call e
               let retNode = Return fnName e
               --Generate assignment nodes for the actual parameters to the formals
@@ -203,13 +209,11 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
               --Control edges to generate
               let firstHead = (headMap IntMap.! (getLabel $ head argList))
               let otherHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) $ tail argList
-              let tailLists = map (\arg -> tailMap IntMap.! (getLabel $ arg) )  argList
-              let (assignParamEdges, calcNextParamEdges, gotoFormalEdges) =
-                    case argList of
-                      [] -> error "Fn Call with no argument"
-                      _ -> (concatMap connectLists $ zip tailLists argNodes,
-                           concatMap connectLists $ zip (init argNodes) otherHeads,
-                           connectLists ((last argNodes), [head assignFormalNodes]))
+
+              let calcNextParamEdges =
+                    concatMap connectLists $ zip (init argTails) (tail otherArgHeads)
+              
+              let gotoFormalEdges = connectLists (last argTails, [head assignFormalNodes])
 
               let assignFormalEdges = zip (init assignFormalNodes) (tail assignFormalNodes)
               let callEdges = [(last assignFormalNodes, callNode ),
@@ -228,7 +232,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
                             (IntMap.insert (getLabel e) firstHead headMap,
                              IntMap.insert (getLabel e) [ourTail] tailMap,
                               --[callNode, retNode] ++ (concat argNodes),
-                             assignParamEdges ++ calcNextParamEdges ++ assignFormalEdges ++
+                             assignFormalEdges ++ calcNextParamEdges ++ assignFormalEdges ++
                                gotoFormalEdges ++ callEdges ++
                                callEdges ++ returnEdges ++ subEdges  ) --TODO app edges
                 --If we haven't applied all the arguments, we just do nothing
@@ -249,9 +253,9 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       --of the if expression
       let guards = (map fst condCasePairs)
       let bodies = map snd condCasePairs
-      let bodyTails = concatMap tailExprs bodies
+      --let bodyTails = concatMap tailExprs bodies
       --let guardNodes = map Branch guards
-      let bodyNodes = map (tailAssign $ getLabel e) bodyTails
+      let bodyTails = map (\bodyEx -> tailMap IntMap.! (getLabel bodyEx)) bodies
       --Each guard is connected to the next guard, and the "head" control node of its body
       let ourHead = headMap IntMap.! (getLabel $ head guards)
       let otherHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) (tail guards)
@@ -263,7 +267,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let guardBodyEdges = concatMap connectLists $ zip guardEnds bodyHeads
 
       let ourTail = [(Assign (IntermedExpr (getLabel e)) body) | body <- bodies]
-      let endEdges = connectLists (bodyNodes, ourTail)
+      let endEdges = connectLists (concat bodyTails, ourTail)
 
       return (
         IntMap.insert (getLabel e) ourHead headMap --First statement is eval first guard
@@ -422,11 +426,11 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   let argPats = (functionArgPats e)
   let argLabels = (functionArgLabels e)
   let argPatLabels = zip argPats argLabels
-  let argVars = concatMap getPatternVars argPats
+  --let argVars = concatMap getPatternVars argPats
   let ourHead = ProcEntry e
   let ourTail = [ProcExit e]
-  let bodyTails = tailExprs body
-  let tailNodes = concatMap (\e -> tailMap  IntMap.! (getLabel e) ) bodyTails
+  --let bodyTails = tailExprs body
+  let tailNodes =  tailMap IntMap.! (getLabel body) 
   let assignReturns = [AssignParam
                         (FormalReturn (nameToCanonVar name) )
                         (IntermedExpr $ getLabel body) body]
@@ -604,11 +608,11 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
   fnName <- functionName e
   argList <- argsGiven e
   let firstHead = (headMap IntMap.! (getLabel $ head argList))
-  let otherHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) $ tail argList
-  let tailLists = map (\arg -> tailMap IntMap.! (getLabel $ arg) )  argList
-  let argNodes = paramNodes argList
-  let assignParamEdges = concatMap connectLists $ zip tailLists argNodes
-  let calcNextParamEdges = concatMap connectLists $ zip (init argNodes) otherHeads
+  let otherArgHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) $ tail argList
+  let argTails = map (\arg -> tailMap IntMap.! (getLabel $ arg) )  argList
+  --let argNodes = paramNodes argList
+  --let assignParamEdges = concatMap connectLists $ zip tailLists argNodes
+  let calcNextParamEdges = concatMap connectLists $ zip (init argTails) otherArgHeads
   ourTail <- case (Var.name fnName) of
     --We pass on our monadic value by writing to the "value" of the statement
     "newRef" -> return $
@@ -632,7 +636,7 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
   let goToTailEdges = connectLists (tailMap  IntMap.! (getLabel $ last argList), ourTail)
   return (IntMap.insert (getLabel e) firstHead headMap,
           IntMap.insert (getLabel e) ourTail tailMap,
-          assignParamEdges ++ calcNextParamEdges ++ goToTailEdges)
+          calcNextParamEdges ++ goToTailEdges) --TODO need assign param?
 
 -- | Given an operator, return whether it is arithmetic, or if it needs to be
 -- | treated as a function call
