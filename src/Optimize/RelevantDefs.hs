@@ -79,7 +79,8 @@ getRelevantDefs
   -> LabeledExpr
   -> Maybe (ProgramInfo LabelNode,
            Map.HashMap LabelNode (HSet.HashSet (VarPlus, Label)),
-           [LabelNode])
+           [LabelNode],
+           [(LabelNode, [LabelNode])])
 getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
   let
     --TODO add info for external calls!
@@ -138,7 +139,9 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
         relevantDefs = trace ("\n\nTheDefs \n\n" ++ (show theDefs) ++ "\n\n\n" ) $ Map.mapWithKey
                        (\x (ReachingDefs s) ->
                          HSet.filter (isExprRef fnInfo expDict x) s) theDefs
-      in trace ("\n\nRelevant Defs \n\n" ++ show relevantDefs )$ Just (pinfo, relevantDefs, targetNodes)
+        controlEdges =
+          [(Branch l, edgeMap pinfo (Branch l)) | Branch l <- allLabels pinfo ]
+      in trace ("\n\nRelevant Defs \n\n" ++ show relevantDefs )$ Just (pinfo, relevantDefs, targetNodes, controlEdges)
 
 -- | Useful for debugging
 instance Show (ProgramInfo LabelNode) where

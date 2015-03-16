@@ -134,19 +134,22 @@ sdgProgInfo
   -> LabeledExpr
   -> Maybe (ProgramInfo SDGNode, [SDGNode])
 sdgProgInfo initFnInfo names eAnn = do
-    (reachDefInfo, relevantDefs, targetNodes) <- getRelevantDefs initFnInfo  eAnn
+    (reachDefInfo, relevantDefs, targetNodes, rawControlEdges) <-
+        getRelevantDefs initFnInfo  eAnn
     --targetNodes <- getTargetNodes names eAnn
     let callEdges =
           map makeFunctionEdge $ filter isFunctionEdge (labelPairs reachDefInfo)
-    let controlEdges = [] --TODO need control flow edges?s
     let dataEdges =
           concat $ Map.elems $ Map.mapWithKey
             (\n rdSet -> [(SDGDef var def, toSDG n) | (var,  def) <- (HSet.toList rdSet)] ) relevantDefs
+    let controlEdges = [(toSDG nBranch, toSDG nDep) |
+                         (nBranch, subList) <- rawControlEdges,
+                         nDep <- subList] 
     let originalLabels = map toSDG $ Map.keys relevantDefs
     --If n1 depends on def at label lab, then we have lab -> n1 as dependency
     --TODO is this right?
     --let dataEdges = map (\(n1, lab) -> (SDGLabel lab, toSDG n1)  ) relevantDefEdges
-    let allEdges =  callEdges ++ controlEdges ++ dataEdges
+    let allEdges =  List.nub $ callEdges ++ controlEdges ++ dataEdges
     let sdgTargets = trace ("SDG Edges " ++ show allEdges )$ makeTargetSet $ Set.fromList targetNodes
     let pinfo =
           ProgramInfo {
