@@ -266,16 +266,18 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
     --allStatements = (map fst patStatements) ++ [lastStmt]
 
     cleanMonadic taskStruct = case taskStruct of
-      TSeq s1 _ s2 -> if (isRelevantStmt s1) then taskStruct else (cleanMonadic s2)
-      TCase e cases -> TCase e $ map (\(p,s) -> (p, cleanMonadic s)) cases
-      TBranch guardCases -> TBranch $ map (\(g,s) -> (g, cleanMonadic s)) guardCases
+      TSeq expr s1 _ s2 -> if (isRelevantStmt s1) then taskStruct else (cleanMonadic s2)
+      TCase expr e cases -> TCase expr e $ map (\(p,s) -> (p, cleanMonadic s)) cases
+      TBranch expr guardCases -> TBranch expr $ map (\(g,s) -> (g, cleanMonadic s)) guardCases
       _ -> taskStruct
 
     isRelevantStmt t = case t of
       Task s -> isRelevant s
-      TSeq _ _ _  -> True
-      TCase e cases -> or $ map isRelevantStmt $ map snd cases
-      TBranch cases -> or $ map isRelevantStmt $ map snd cases
+      TSeq _ _ _ _  -> True
+      TCase expr e cases -> or $ map isRelevantStmt $ map snd cases
+      TBranch expr cases -> or $ map isRelevantStmt $ map snd cases
+      TCall _ expr -> True --TODO more fine grained?
+      
 
     isRelevant stmt =
       let
@@ -292,20 +294,21 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
     --Put our monadic statements back into functional form
     reAssembleSeq :: TaskStructure -> LabeledExpr
     reAssembleSeq t = case t of
-      (TSeq stmt (pat, expr) rest) ->
+      (TSeq expr stmt pat rest) ->
          (A (getAnn expr) $ Binop op (reAssembleSeq stmt) (A (getAnn $ reAssembleSeq rest)
                            $ Lambda pat $ reAssembleSeq rest))
-      (TBranch guardCases) ->
-         A (getAnn $ fst $ head guardCases) $ MultiIf $
+      (TBranch expr guardCases) ->
+         A (getAnn expr) $ MultiIf $
            map (\(g,s) -> (g, reAssembleSeq s)) guardCases
-      (TCase caseExp patSeqPairs) ->
-        A (getAnn caseExp) $ Case caseExp $ map (\(p,s) -> (p, reAssembleSeq s)) patSeqPairs
+      (TCase expr caseExp patSeqPairs) ->
+        A (getAnn expr) $ Case caseExp $ map (\(p,s) -> (p, reAssembleSeq s)) patSeqPairs
       (Task s) -> s
+      (TCall _ s) -> s
     
     --Add our function arguments back
     reAssemble [] accum = accum
     reAssemble ((argPat, ann):rest) accum = reAssemble rest $ A ann (Lambda argPat accum) 
-  in reAssemble argPatLabels $ reAssembleSeq cleanedStmt
+  in reAssemble (reverse argPatLabels) $ reAssembleSeq cleanedStmt
 
 
 -- | Given the label for the RHS of a definition,

@@ -10,7 +10,7 @@ import qualified AST.Pattern                as Pattern
 import qualified AST.Variable               as Var
 import           Control.Monad
 import qualified Data.List                  as List
-import qualified Data.Map                   as Map hiding ((!))
+import qualified Data.Map                   as Map 
 import qualified Data.Set                   as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
@@ -26,7 +26,7 @@ import Data.Char (isUpper)
 
 import qualified AST.Type                   as Type
 import Data.Hashable
-import           Debug.Trace                (trace)
+import           Debug.Trace                (trace, traceStack)
 --trace _ x = x
 
 -- | Type for variables or some "special cases"
@@ -63,10 +63,11 @@ which we then integrate into our CFG.
 |-}
 data TaskStructure =
   Task LabeledExpr
-  | TSeq TaskStructure (Pattern, LabeledExpr ) TaskStructure
-  | TBranch [(LabeledExpr, TaskStructure)]
-  | TCase LabeledExpr [(Pattern, TaskStructure)]
-  | TCall LabeledExpr
+  | TSeq LabeledExpr TaskStructure (Pattern) TaskStructure
+  | TBranch LabeledExpr [(LabeledExpr, TaskStructure)]
+  | TCase LabeledExpr LabeledExpr [(Pattern, TaskStructure)]
+  | TCall LabeledExpr LabeledExpr
+    deriving (Show)
 
 -- | We use this to store nodes in a HashMap, hopefully
 -- | to get some speed increases
@@ -93,14 +94,21 @@ getNodeLabel (ProcEntry n) = n
 getNodeLabel (ProcExit n) = n
 --getNodeLabel _ = Label 0
 
+{-
 -- Just Map.!, but printing useful info if the item is not in the map
 mapGet :: (Ord k, Show k, Show a) => Map.Map k a -> k -> a
 mapGet m k = case Map.lookup k m of
   Nothing -> error $ "Couldn't find key " ++ (show k) ++ " in map " ++ (show $ Map.toList m )
   Just e -> e
+-}
 
-labelLook :: IntMap.IntMap a -> LabeledExpr -> Maybe a
-labelLook dict expr = IntMap.lookup (getLabel expr) dict
+labelLook
+  :: IntMap.IntMap [ControlNode]
+  -> LabeledExpr
+  -> Maybe [ControlNode]
+labelLook dict expr = case IntMap.lookup (getLabel expr) dict of
+  Nothing -> traceStack ("\n\n!!!!!Couldn't find " ++ show (expr) ++ "in Dict "  ) $ Nothing
+  Just x -> Just x
 
 {-|
 Information about each function defined in a module.
@@ -530,9 +538,9 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
 {-| 
 --Given a monadic structure, create control-flow edges for each statement
 |-}
-monadStructureEdges fnInfo taskStruct =
+monadStructureEdges fnInfo taskStruct = trace  "MonStrucEdg" $
   case taskStruct of
-    Task s -> do
+    Task s -> trace "Task" $ do
       (headMap, tailMap, subEdges) <- allExprEdges fnInfo s
       ourHead <- labelLook headMap s
       ourTail <- labelLook tailMap s
@@ -541,21 +549,25 @@ monadStructureEdges fnInfo taskStruct =
               IntMap.insert (getLabel s) ourHead headMap,
               IntMap.insert (getLabel s) ourTail tailMap,
               subEdges)
-    TSeq s1 (pat, expr) s2 -> do
+    TSeq ourExpr s1 (pat) s2 -> trace ("TSeq " ++ show taskStruct) $ do
+      let ourLabel = getLabel ourExpr
       (ourHead, innerTail, hm1, tm1, edges1) <- monadStructureEdges fnInfo s1
       (innerHead, ourTail, hm2, tm2, edges2) <- monadStructureEdges fnInfo s2
       let assignNodes =
-            [Assign (NormalVar var (getLabel expr)) expr
+            [Assign (NormalVar var (getLabel ourExpr)) ourExpr
              | var <- getPatternVars pat]
-      let gotoAssignEdges = connectLists (innerTail, [head assignNodes])
-      let insideAssignEdges = zip (init assignNodes) (tail assignNodes)
-      let gotoNextEdges = connectLists ([last assignNodes], innerHead)
+      let (gotoAssignEdges, insideAssignEdges, gotoNextEdges) = case assignNodes of
+            [] -> (connectLists (innerTail, innerHead), [], [])
+            _ -> (connectLists (innerTail, [head assignNodes]),
+                 zip (init assignNodes) (tail assignNodes),
+                 connectLists ([last assignNodes], innerHead))
       return (ourHead,
               ourTail,
-              IntMap.union hm1 hm2,
-              IntMap.union tm1 tm2,
+              IntMap.insert ourLabel ourHead $ IntMap.union hm1 hm2,
+              IntMap.insert ourLabel ourTail $ IntMap.union tm1 tm2,
               edges1 ++ edges2 ++ gotoAssignEdges ++ insideAssignEdges ++ gotoNextEdges)
-    TBranch guardStatementPairs -> do
+    TBranch ourExpr guardStatementPairs -> trace ("TBranch " ++ show taskStruct) $ do
+      let ourLabel = getLabel ourExpr
       infoList <- mapM
         (\(g, s) -> do
             gInfo <- allExprEdges fnInfo g
@@ -573,6 +585,7 @@ monadStructureEdges fnInfo taskStruct =
       let subEdges = nonMonadEdges ++ ( concatMap (\(_,_,_,_,e) -> e) $ map snd infoList)
       let ourHead = head guardHeads
       let guardToBodyEdges = concatMap connectLists $ zip guardTails bodyHeads
+      --List should never be empty
       let interGuardEdges = concatMap connectLists $ zip (init guardTails) (tail guardHeads)
       let ourTails = concat bodyTails
       let (mHeadMaps, mTailMaps) = unzip $ map (\(_,_,h,t,_) -> (h,t)) $ map snd infoList
@@ -581,11 +594,12 @@ monadStructureEdges fnInfo taskStruct =
       
       return (ourHead,
               ourTails,
-              newHeadMap,
-              newTailMap,
+              IntMap.insert ourLabel ourHead newHeadMap,
+              IntMap.insert ourLabel ourTails newTailMap,
               subEdges ++ guardToBodyEdges ++ interGuardEdges)
     
-    TCase caseExp patStmtPairs -> do
+    TCase ourExpr caseExp patStmtPairs -> trace ("TCase " ++ show taskStruct) $do
+      let ourLabel = getLabel ourExpr
       (headMap, tailMap, nonMonadicEdges) <- allExprEdges fnInfo caseExp
       ourHead <- labelLook headMap caseExp
       bodyTails <- labelLook tailMap caseExp
@@ -599,17 +613,19 @@ monadStructureEdges fnInfo taskStruct =
       
       return (ourHead,
               ourTails,
-              newHeadMap,
-              newTailMap,
+              IntMap.insert ourLabel ourHead newHeadMap,
+              IntMap.insert ourLabel ourTails newTailMap,
               subEdges ++ gotoArmEdges)
-    TCall app -> do
+    --TODO get rid of call?
+    TCall ourExpr app -> trace ("TCall " ++ show taskStruct) $ do
+      let ourLabel = getLabel ourExpr
       (headMap, tailMap, subEdges) <- allExprEdges fnInfo app
       ourHead <- labelLook headMap app
       ourTail <- labelLook tailMap app 
       return (ourHead
               , ourTail
-              , headMap
-              , tailMap
+              , IntMap.insert ourLabel ourHead headMap
+              , IntMap.insert ourLabel ourTail tailMap
               , subEdges)
 
   
@@ -707,12 +723,13 @@ sequenceMonadic e@(A _ (Binop op e1 (A _ (Lambda pat body)) )) =
     "andThen" -> let
         bodySeq = sequenceMonadic body
         headSeq = sequenceMonadic e1
-      in TSeq headSeq (pat,e) bodySeq
+      in TSeq e headSeq pat bodySeq
     _ -> Task e
+sequenceMonadic e@(A _ (App _ _)) = TCall e e
 sequenceMonadic e@(A _ (MultiIf guardCasePairs)) =
-  TBranch $ map (\(g, body) -> (g, (sequenceMonadic body))) guardCasePairs
+  TBranch e $ map (\(g, body) -> (g, (sequenceMonadic body))) guardCasePairs
 sequenceMonadic e@(A _ (Case caseExp patCasePairs)) =
-  TCase caseExp $ map (\(pat, arm) -> (pat, sequenceMonadic arm)) patCasePairs
+  TCase e caseExp $ map (\(pat, arm) -> (pat, sequenceMonadic arm)) patCasePairs
 sequenceMonadic e = Task e
 
 -- | Return the number of arguments a function takes by counting its lambdas
@@ -827,7 +844,7 @@ interfaceFnInfo interfaces = let
     
   in Map.fromList $ map
      (\(extModName, fnName, iface)  -> let
-                       fnTy = (Module.iTypes iface) `mapGet` fnName
+                       fnTy = (Module.iTypes iface) Map.! fnName
                        fnArity = tyArity fnTy
                        (Name modStrings) = extModName
                        varName = Var.Canonical (Var.Module modStrings) fnName

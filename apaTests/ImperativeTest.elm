@@ -20,6 +20,7 @@ basicStateTest x y =
 stateFn : Int -> StateRef ph Int -> EState ph {}
 stateFn x ref =
   deRef ref `andThen` \oldVal -> 
+  writeRef ref 0 `andThen` \_ ->
   basicStateTest x (Just 20) `andThen` \fnRet ->
   writeRef ref (fnRet + oldVal) `andThen` \_ ->
   liftToState {}
