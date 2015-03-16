@@ -256,20 +256,21 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let bodies = map snd condCasePairs
       --let bodyTails = concatMap tailExprs bodies
       --let guardNodes = map Branch guards
+      let bodyHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) bodies
       let bodyTails = map (\bodyEx -> tailMap IntMap.! (getLabel bodyEx)) bodies
       --Each guard is connected to the next guard, and the "head" control node of its body
-      let ourHead = headMap IntMap.! (getLabel $ head guards)
-      let otherHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) (tail guards)
-      let guardEnds = map (\arg -> tailMap IntMap.! (getLabel $ arg) ) guards
-      let notLastGuardEnds = init guardEnds
-      let bodyHeads = map (\arg -> headMap IntMap.! (getLabel $ arg) ) bodies
+      let (ourHead:otherGuardHeads) = map (\arg -> headMap IntMap.! (getLabel $ arg) ) guards
+      let guardTails = map (\arg -> tailMap IntMap.! (getLabel $ arg) ) guards
+      --let notLastGuardEnds = init guardEnds
+      
 
-      let guardFallthroughEdges = concatMap connectLists $ zip notLastGuardEnds otherHeads
-      let guardBodyEdges = concatMap connectLists $ zip guardEnds bodyHeads
+      let guardFallthroughEdges = concatMap connectLists $ zip (init guardTails) otherGuardHeads
+      let guardBodyEdges = concatMap connectLists $ zip guardTails bodyHeads
 
-      let ourTail = [(Assign (IntermedExpr (getLabel e)) body) | body <- bodies]
-      let endEdges = connectLists (concat bodyTails, ourTail)
-
+      let bodyAssigns = map (\bod ->[(Assign (IntermedExpr (getLabel e)) bod) ]) bodies
+      
+      let endEdges = concatMap connectLists $ zip bodyTails bodyAssigns
+      let ourTail = concat bodyAssigns
       return (
         IntMap.insert (getLabel e) ourHead headMap --First statement is eval first guard
          ,IntMap.insert (getLabel e) ourTail tailMap --Last statements are any tail exps of bodies
