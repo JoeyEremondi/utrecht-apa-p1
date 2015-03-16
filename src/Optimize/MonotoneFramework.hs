@@ -30,9 +30,9 @@ import Data.Hashable
 
 import           Data.Text.Lazy                    (pack, unpack)
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 --TODO remove
-trace _ x = x
+--trace _ x = x
 
 
 newtype FlowEdge label = FlowEdge (label, label)
@@ -126,7 +126,7 @@ minFP lat@(Lattice{..}) f info = trace ("In MinFP" ++ show (length $ labelPairs 
       al' = currentSolns Map.! l'
       fal = f currentSolns l al
       (newPairs, newSolns) =
-        if (trace ("FP Comparing label\n" ++ (show l) ++ "\n***" ++ (show fal) ++ "\n***" ++ (show al') ) $ not $ fal `lleq` al')
+        if (trace ("FP Comparing label\n" ++ (show l) ++ " to " ++ (show l') ) $ not $ fal `lleq` al')
         then trace "Adding edge" $ let
             theMap = Map.insert l' (latticeJoin fal al') currentSolns
             thePairs = map (\lNeighbour -> (l', lNeighbour) ) $ edgeMap info l'

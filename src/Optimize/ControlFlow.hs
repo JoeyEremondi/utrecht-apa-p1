@@ -53,7 +53,7 @@ data ControlNode' expr =
   | ProcExit (expr)
   | ExprEval (expr)
   | ExternalCall Var (expr)
-  | ExternalStateCall Var [VarPlus]
+  | ExternalStateCall Var [VarPlus] (expr)
     deriving (Functor, Eq, Ord, Show)
 
 -- | We use this to store nodes in a HashMap, hopefully
@@ -71,7 +71,7 @@ instance Hashable LabelNode where
 getNodeLabel :: ControlNode' Label -> Label
 getNodeLabel (Branch n) = n
 getNodeLabel (ExternalCall _ l) = l
-getNodeLabel (ExternalStateCall _ _) = externalCallLabel
+getNodeLabel (ExternalStateCall _ _ l) = l
 getNodeLabel (Assign _ n2) = n2
 getNodeLabel (AssignParam _ _ n2) = n2
 getNodeLabel (ExprEval n) = n
@@ -356,7 +356,7 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
       let orderedDefs = defs --TODO sort these
       --For each def, we make an assignment giving the body's value to each variable
       let getDefAssigns (GenericDef pat b _) =
-             (varAssign label pat) $ b
+             (varAssign  pat) $ b
       let defAssigns = map getDefAssigns orderedDefs
       --let bodyAssigns = map (tailAssign $ getLabel e) $ tailExprs body
 
@@ -562,11 +562,12 @@ monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
            finalAssignEdges ++ concat betweenStatementEdges
              ++ concatMap (\(_,_,edges) -> edges) statementNodes)
 
--- | Given the label for an expression on the RHS of a definition, and the pattern of
--- | that definition, generate the control nodes assigning to all variables defined
+-- | Given the pattern of a definition's LHS
+-- | and the expression on the RHS,
+-- | generate the control nodes assigning to all variables defined
 -- | in the definition
-varAssign :: Label -> Pattern -> LabeledExpr -> [ControlNode]
-varAssign defLabel pat e = [Assign (NormalVar pvar defLabel  ) e |
+varAssign :: Pattern -> LabeledExpr -> [ControlNode]
+varAssign  pat e = [Assign (NormalVar pvar (getLabel e)  ) e |
                    pvar <- getPatternVars pat]
 
 -- | Given an expression representing a function application, return the expression

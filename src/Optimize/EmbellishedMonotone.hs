@@ -39,7 +39,8 @@ fnEquality
 fnEquality lh1@(EmbPayload (domain, lhat)) lh2@(EmbPayload (_, lhat')) =
   let
     areEq = (map ( lhat $ ) domain) == (map (lhat' $ ) domain)
-  in areEq
+  in  areEq
+--trace ("\n\n\nTesting equality of " ++ show (map ( lhat $ ) domain)  ++ "\nand\n" ++ show (map (lhat' $ ) domain)) $
 
 {-|
 Given a domain of context-lists,
@@ -90,14 +91,11 @@ liftToFn
   -> (EmbPayload LabelNode payload)
 
 liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload (domain, lhat)) =
-  EmbPayload (domain, \d -> case d of
-    [] -> latticeBottom
-    ( lc:dRest) -> let
-          isGoodEnd ldom = (take depth (lc:ldom)) == (lc:dRest)
+  EmbPayload (domain, \d ->  let
+          isGoodEnd dposs = (take depth (Call label:dposs)) == d
           possibleEnds = filter isGoodEnd domain
-        in if (Call label == lc)
-           then joinAll lat [lhat dPoss | dPoss <- possibleEnds]
-           else latticeBottom) --error "Invalid call string"
+        in 
+           joinAll lat [lhat dPoss | dPoss <- possibleEnds])
 liftToFn _ _ _f fret resultMap rnode@(Return _ label) (EmbPayload (domain, lhat')) =
   let
     (EmbPayload (_, lhat)) = (resultMap Map.! (Call label) )
@@ -136,8 +134,8 @@ callGraph (A _ (Let defs _)) =
       oneLevelCalls
 
     callMap = Map.fromList $ zip fnLabels $ map (\body -> allCalls body) fnBodies
-    callMapWithExternal = Map.insert externalCallLabel [] callMap
-  in callMapWithExternal
+    --callMapWithExternal = Map.insert externalCallLabel [] callMap
+  in callMap
 
 {-|
 Given the set of all labels in a program, a maximum call string length,
@@ -145,9 +143,9 @@ and the call-graph for a module,
 generate the list of all valid call strings, up to the given length.
 |-}
 contextDomain :: [Label] -> Int -> Map.HashMap Label [Label] -> [[Label]]
-contextDomain allLabels n callMap = helper n callMap ([[]] ++ map (\x -> [x]) allLabelsWithExt)
+contextDomain allLabels n callMap = helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
   where
-    allLabelsWithExt = [externalCallLabel] ++ allLabels
+    --allLabelsWithExt = [externalCallLabel] ++ allLabels
     helper 0 _ _ = [[]]
     helper 1 _ accum = accum
     helper n callMap accum = let

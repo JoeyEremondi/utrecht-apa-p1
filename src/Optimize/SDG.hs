@@ -64,6 +64,10 @@ makeTargetSet = Set.map toSDG
 toSDG :: LabelNode -> SDGNode
 toSDG lnode = case lnode of
   Assign var label -> SDGDef var label
+  Call _ -> SDGFunction lnode
+  Return _ _ -> SDGFunction lnode
+  ProcEntry _ -> SDGFunction lnode
+  ProcExit _ -> SDGFunction lnode
   _ -> SDGLabel $ getNodeLabel lnode
 
 -- | The lattice corresponding to forward slicing
@@ -280,14 +284,16 @@ defIsRelevant :: Label -> [SDGNode] -> Map.HashMap SDGNode SDG -> LabelDef -> Bo
 defIsRelevant defLabel targetNodes reachedNodesMap (GenericDef pat expr _ty) = let
         definedVars = getPatternVars pat
         definedVarPlusses = map (\v -> NormalVar v defLabel) definedVars
-        nodesForDefs = map (\var -> SDGDef var (getLabel expr)) definedVarPlusses
+        --nodesForDefs = map (\var -> SDGDef var (getLabel expr)) definedVarPlusses
+        --Get labels in the same way we do for defs in CFG
+        nodesForDefs = map toSDG $ map (getLabel `fmap`) $ varAssign pat expr
         reachedNodes = Set.unions $
           map (\varNode -> case (Map.lookup varNode reachedNodesMap ) of
                   Just x -> unSDG x
                   Nothing -> Set.empty) nodesForDefs
                   -- EmbPayload _ lhat -> unSDG $ lhat []) nodesForDefs
         isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
-      in isRel
+      in trace ("Testing if " ++ show pat ++ " is relevant\n" ++ (show $ Set.fromList targetNodes) ++ "\n" ++ show reachedNodes ++ ("Nodes for def " ++ show definedVars ++ " : " ++ show nodesForDefs) ) $ isRel
 
 
 

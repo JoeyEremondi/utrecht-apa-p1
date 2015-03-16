@@ -303,11 +303,15 @@ liftAnn :: (Expr' a d v -> r) -> (Expr a d v -> r)
 liftAnn f (A _ e) = f e
 
 -- | Apply a transformation on expressions, leaving annotations the same
-tformEverywhere :: (Expr a d v -> Expr a d v) -> Expr a d v -> Expr a d v
-tformEverywhere f = tformE
+tformEverywhere :: (Expr a (GenericDef a v) v -> Expr a (GenericDef a v) v) -> Expr a (GenericDef a v) v -> Expr a (GenericDef a v) v
+tformEverywhere f =
+  let
+    tformDefs = \ _ (GenericDef pat body ty) -> GenericDef pat (tformEverywhere f body) ty
+
+  in tformE
                   (\_ _ -> repeat ())
                   ()
-                  (cid, cid, cid, \_ -> f)
+                  (cid, tformDefs, cid, \_ -> f)
 
 -- | Lift a transformation on expressions to each definition in a module
 tformModule :: (Canon.Expr -> Canon.Expr) -> Module.CanonicalModule -> Module.CanonicalModule
@@ -321,19 +325,15 @@ tformModule f m =
 
 {-|
 Given a labeled expresssion and a variable name,
-return whether or not the expression refers to that varible.
+return whether or not the expression refers to that varible,
+excluding the Right-Hand-Side of Let statements
 Useful for Dead Code elimination.
 |-}
 expContainsVar :: LabeledExpr -> Var -> Bool
-expContainsVar e v =
-  foldE
-  (\_ () -> repeat () )
-  ()
-  (\(GenericDef _ e v) -> [e])
-  (\ _ (A _ expr) subContains ->
-    (or subContains) || case expr of
-      Var vexp -> v == vexp
-      _ -> False) e
+expContainsVar fullE@(A _ e) v = case e of
+  Let _ body -> expContainsVar body v
+  Var theVar -> v == theVar
+  _ -> or $ map (\ex -> expContainsVar ex v) $ directSubExprs fullE
 
 {-|
 Given a labeled expresssion and a label of an expresion,
@@ -349,21 +349,21 @@ expContainsLabel e lin =
     (or subContains) || (lExp == lin ) ) e
 
 -- | We need a dummy value for calls that are not in scope
-externalCallLabel :: Label
-externalCallLabel =  (-9999)
+--externalCallLabel :: Label
+--externalCallLabel =  (-9999)
 
 -- | The default annotation given to external calls
 -- | We need this to make optimization information about functions
 -- | defined in separate modules
-externalCallAnn :: (Region, Label, Env Label)
-externalCallAnn = (error "Should never access external call region",
-                          externalCallLabel,
-                          error "Should never access external call env")
+--externalCallAnn :: (Region, Label, Env Label)
+--externalCallAnn = (error "Should never access external call region",
+--                          externalCallLabel,
+--                          error "Should never access external call env")
 
 -- | Given a labeled expression, generate the dictionary mapping
 -- | labels to the sub-expressions they represent
 labelDict :: LabeledExpr -> IntMap.IntMap LabeledExpr
-labelDict e = IntMap.insert externalCallLabel (A externalCallAnn $ Record []) $
+labelDict e = --IntMap.insert externalCallLabel (A externalCallAnn $ Record []) $
   foldE
   (\ _ () -> repeat ())
   ()
@@ -413,7 +413,15 @@ tformModEverywhere
   :: (Expr a (GenericDef a v) v -> Expr a (GenericDef a v) v)
   -> Annotated ann (Expr' ann (GenericDef a v) var)
   -> Expr ann (GenericDef a v) var
-tformModEverywhere f e = tformModE (\_ _ -> repeat ()) () (cid, cid, cid, \_ -> f) e
+tformModEverywhere f e =
+  let
+    tformDefs = \ _ (GenericDef pat body ty) -> GenericDef pat (tformEverywhere f body) ty
+  in tformModE (\_ _ -> repeat ()) ()
+  (cid,
+   tformDefs, --TODO redundant?
+   cid,
+     \_ -> f)
+    e
 
 -- | Given an expression, return the list of expressions it directly references
 -- | Should be reasonably efficient due to lazy evaluation
