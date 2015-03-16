@@ -21,6 +21,7 @@ import           Optimize.Types
 import qualified Elm.Compiler.Module        as PublicModule
 import qualified Data.IntMap as IntMap
 
+
 import Data.Char (isUpper)
 
 import qualified AST.Type                   as Type
@@ -55,6 +56,17 @@ data ControlNode' expr =
   | ExternalCall Var (expr)
   | ExternalStateCall Var [VarPlus] (expr)
     deriving (Functor, Eq, Ord, Show)
+
+{-|
+We use this to make a tree-like structure for monadic code,
+which we then integrate into our CFG.
+|-}
+data TaskStructure =
+  Task LabeledExpr
+  | TSeq TaskStructure (Pattern, LabeledExpr ) TaskStructure
+  | TBranch [(LabeledExpr, TaskStructure)]
+  | TCase LabeledExpr [(Pattern, TaskStructure)]
+  | TCall LabeledExpr
 
 -- | We use this to store nodes in a HashMap, hopefully
 -- | to get some speed increases
@@ -516,6 +528,93 @@ functionDefEdges (headMap, tailMap) (GenericDef (Pattern.Var name) e@(A (_,label
   return $ startEdges ++ assignFormalEdges ++ assignReturnEdges ++ fnExitEdges ++ gotoBodyEdges
 
 {-| 
+--Given a monadic structure, create control-flow edges for each statement
+|-}
+monadStructureEdges fnInfo taskStruct =
+  case taskStruct of
+    Task s -> do
+      (headMap, tailMap, subEdges) <- allExprEdges fnInfo s
+      ourHead <- labelLook headMap s
+      ourTail <- labelLook tailMap s
+      return (ourHead,
+              ourTail,
+              IntMap.insert (getLabel s) ourHead headMap,
+              IntMap.insert (getLabel s) ourTail tailMap,
+              subEdges)
+    TSeq s1 (pat, expr) s2 -> do
+      (ourHead, innerTail, hm1, tm1, edges1) <- monadStructureEdges fnInfo s1
+      (innerHead, ourTail, hm2, tm2, edges2) <- monadStructureEdges fnInfo s2
+      let assignNodes =
+            [Assign (NormalVar var (getLabel expr)) expr
+             | var <- getPatternVars pat]
+      let gotoAssignEdges = connectLists (innerTail, [head assignNodes])
+      let insideAssignEdges = zip (init assignNodes) (tail assignNodes)
+      let gotoNextEdges = connectLists ([last assignNodes], innerHead)
+      return (ourHead,
+              ourTail,
+              IntMap.union hm1 hm2,
+              IntMap.union tm1 tm2,
+              edges1 ++ edges2 ++ gotoAssignEdges ++ insideAssignEdges ++ gotoNextEdges)
+    TBranch guardStatementPairs -> do
+      infoList <- mapM
+        (\(g, s) -> do
+            gInfo <- allExprEdges fnInfo g
+            sInfo <- monadStructureEdges fnInfo s
+            return (gInfo, sInfo)) guardStatementPairs
+      let (headMap, tailMap, nonMonadEdges) =
+            List.foldl' (\ (headSoFar, tailSoFar, edgesSoFar) (h1,t1,e1) ->
+                     (IntMap.union headSoFar h1,
+                     IntMap.union tailSoFar t1,
+                     edgesSoFar ++ e1)) (IntMap.empty, IntMap.empty, [] ) $ map fst infoList
+      guardHeads <- mapM (labelLook headMap) $ map fst guardStatementPairs
+      guardTails <- mapM (labelLook tailMap) $ map fst guardStatementPairs
+      let bodyHeads = map (\(h,_,_,_,_) -> h) $ map snd infoList
+      let bodyTails = map (\(_,t,_,_,_) -> t) $ map snd infoList
+      let subEdges = nonMonadEdges ++ ( concatMap (\(_,_,_,_,e) -> e) $ map snd infoList)
+      let ourHead = head guardHeads
+      let guardToBodyEdges = concatMap connectLists $ zip guardTails bodyHeads
+      let interGuardEdges = concatMap connectLists $ zip (init guardTails) (tail guardHeads)
+      let ourTails = concat bodyTails
+      let (mHeadMaps, mTailMaps) = unzip $ map (\(_,_,h,t,_) -> (h,t)) $ map snd infoList
+      let newHeadMap = IntMap.union headMap $ IntMap.unions mHeadMaps
+      let newTailMap = IntMap.union tailMap $ IntMap.unions mTailMaps
+      
+      return (ourHead,
+              ourTails,
+              newHeadMap,
+              newTailMap,
+              subEdges ++ guardToBodyEdges ++ interGuardEdges)
+    
+    TCase caseExp patStmtPairs -> do
+      (headMap, tailMap, nonMonadicEdges) <- allExprEdges fnInfo caseExp
+      ourHead <- labelLook headMap caseExp
+      bodyTails <- labelLook tailMap caseExp
+      infoList <- mapM (monadStructureEdges fnInfo) $ map snd patStmtPairs
+      let subEdges = nonMonadicEdges ++ (concatMap (\(_,_,_,_,e) -> e) infoList )
+      let gotoArmEdges = concatMap (\(h,_,_,_,_) -> connectLists (bodyTails, h)) infoList
+      let ourTails = concatMap (\(_,t,_,_,_) -> t) infoList
+      let (mHeadMaps, mTailMaps) = unzip $ map (\(_,_,h,t,_) -> (h,t)) infoList
+      let newHeadMap = IntMap.union headMap $ IntMap.unions mHeadMaps
+      let newTailMap = IntMap.union tailMap $ IntMap.unions mTailMaps
+      
+      return (ourHead,
+              ourTails,
+              newHeadMap,
+              newTailMap,
+              subEdges ++ gotoArmEdges)
+    TCall app -> do
+      (headMap, tailMap, subEdges) <- allExprEdges fnInfo app
+      ourHead <- labelLook headMap app
+      ourTail <- labelLook tailMap app 
+      return (ourHead
+              , ourTail
+              , headMap
+              , tailMap
+              , subEdges)
+
+  
+
+{-| 
 --Given a monadic expression, break it up into statements
 --And calculate the edges between those statements in our CFG
 --TODO self recursion?
@@ -530,41 +629,10 @@ monadicDefEdges
     [(ControlNode, ControlNode)] )
 monadicDefEdges fnInfo (GenericDef (Pattern.Var fnName) e _) =  do
   let body = functionBody e
-  let (patternStmts, lastStmt) = sequenceMonadic body
-  let allStmts = (map fst (patternStmts)) ++ [lastStmt]
-  let patternLabels = map snd patternStmts
-  statementNodes <- forM allStmts (allExprEdges fnInfo)
-
-  let linkStatementEdges (stmtInfo1, (pat,andThenExpr), stmtInfo2) = do
-        let (s1, (_, tailMap1, _)) = stmtInfo1
-        let (s2, (headMap2, _, _)) = stmtInfo2
-        s1Tail <- labelLook tailMap1 s1
-        s2Head <- labelLook headMap2  s2
-        --TODO is this the right label?
-        let assignParamNode = AssignParam (FormalParam pat (getLabel s2)) (IntermedExpr (getLabel s1)) andThenExpr
-        return $  (connectLists (s1Tail, [assignParamNode] )) ++ (connectLists ([assignParamNode], s2Head))
-
-  let stmtsAndNodes = zip allStmts statementNodes
-  let edgeTriples =  zip3 (init stmtsAndNodes) patternLabels (tail stmtsAndNodes)
-  betweenStatementEdges <- concat `fmap` mapM linkStatementEdges edgeTriples
-  let combinedHeads = IntMap.unions $ map (\(hmap,_,_) -> hmap) statementNodes
-  let combinedTails = IntMap.unions $ map (\(_, tmap, _) -> tmap) statementNodes
-  lastStatementTails <- labelLook combinedTails lastStmt
-  ourHeads <- labelLook combinedHeads (head allStmts)
-  let ourTails =
-        [AssignParam
-         (IntermedExpr (getLabel body))
-         (IntermedExpr $ getLabel $ lastStmt)
-         e]
-  let finalAssignEdges = connectLists(lastStatementTails, ourTails)
-  let newHeads =
-        IntMap.insert (getLabel body) ourHeads combinedHeads
-  let newTails =
-        IntMap.insert (getLabel body) ourTails combinedTails
-  return $ (newHeads,
-           newTails,
-           finalAssignEdges ++  betweenStatementEdges
-             ++ concatMap (\(_,_,edges) -> edges) statementNodes)
+  let taskStruct = sequenceMonadic body
+  (_,_,headMap, tailMap, subEdges) <-
+    monadStructureEdges fnInfo taskStruct
+  return (headMap, tailMap, subEdges)
 
 -- | Given the pattern of a definition's LHS
 -- | and the expression on the RHS,
@@ -605,6 +673,10 @@ functionArgLabels :: LabeledExpr -> [Label]
 functionArgLabels (A (_,l,_) (Lambda pat e)) = [l] ++ (functionArgLabels e)
 functionArgLabels _ = []
 
+functionArgsAndAnn :: LabeledExpr -> [(Pattern, (Region, Label, Env Label))]
+functionArgsAndAnn (A ann (Lambda pat e)) = [(pat, ann)] ++ (functionArgsAndAnn e) 
+functionArgsAndAnn _ = []
+
 -- | Get the "final" return type of a function type
 -- | i.e. what's returned if it is fully applied
 functionFinalReturnType :: Type.CanonicalType -> Type.CanonicalType
@@ -629,15 +701,19 @@ isStateMonadFn _ = trace "monad Nothing Type" $ False
 -- | using a monadic bind.
 -- | We also return the last statement, whose value is the result of the monadic computation.
 sequenceMonadic :: LabeledExpr
-                -> ([(LabeledExpr, (Pattern,LabeledExpr))]
-                    , LabeledExpr)
-sequenceMonadic e@(A _ (Binop op e1 (A _ (Lambda pat body)) )) = case (Var.name op) of
-  "andThen" -> let
-      (bodySeq,bodyTail) = sequenceMonadic body
-      newSeq = [(e1, (pat,e))] ++ bodySeq
-    in ( newSeq, bodyTail)
-  _ -> ([],e)
-sequenceMonadic e = ([],e)
+                -> TaskStructure
+sequenceMonadic e@(A _ (Binop op e1 (A _ (Lambda pat body)) )) =
+  case (Var.name op) of
+    "andThen" -> let
+        bodySeq = sequenceMonadic body
+        headSeq = sequenceMonadic e1
+      in TSeq headSeq (pat,e) bodySeq
+    _ -> Task e
+sequenceMonadic e@(A _ (MultiIf guardCasePairs)) =
+  TBranch $ map (\(g, body) -> (g, (sequenceMonadic body))) guardCasePairs
+sequenceMonadic e@(A _ (Case caseExp patCasePairs)) =
+  TCase caseExp $ map (\(pat, arm) -> (pat, sequenceMonadic arm)) patCasePairs
+sequenceMonadic e = Task e
 
 -- | Return the number of arguments a function takes by counting its lambdas
 getArity :: LabeledExpr -> Int
@@ -659,12 +735,16 @@ argsGiven (A _ e) = case e of
 --TODO qualify?
 -- | Names of special monadic functions whose actions correspond to special control nodes
 -- | For example, writeRef corresponds to an assignment
-specialFnNames = Set.fromList ["newRef", "deRef", "writeRef", "runState"]
+specialFnNames = Set.fromList [
+  Variable.Canonical (Variable.Module ["State", "Escapable"]) "newRef"
+  , Variable.Canonical (Variable.Module ["State", "Escapable"]) "deRef"
+  , Variable.Canonical (Variable.Module ["State", "Escapable"]) "writeRef"
+  ]
 
 --TODO add module?
 -- | Determine if a function is one of our special monadic names
 isSpecialFn :: Var -> Bool
-isSpecialFn v = trace ("!!!! Is Special?" ++ (show $ Var.name v) ) $ Set.member (Var.name v) specialFnNames
+isSpecialFn v = trace ("!!!! Is Special?" ++ (show $ Var.name v) ) $ Set.member v specialFnNames
 
 -- | Generate the control flow edges with a call to a special monadic function
 specialFnEdges
@@ -693,12 +773,7 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
     "writeRef" -> case (head argList) of
         (A _ (Var ref)) -> return $ [Assign (Ref ref) e]
         _ -> trace ("Error for special edges writeRef" ++ show argList ) Nothing
-    "runState" -> case argList of
-      [A _ (Var e)] -> error "TODO runState"
-      [A _ (App e1 _)] -> do
-         stateFnName <- functionName e1
-         return [AssignParam (IntermedExpr $ getLabel e) (FormalReturn stateFnName) e]
-      _ -> trace "Error for special edges" $ Nothing
+    _ -> trace "Error for special edges" $ Nothing
   --TODO connect our tail to the params tail
   let goToTailEdges = connectLists (last argTails, ourTail)
   return (IntMap.insert (getLabel e) firstHead headMap,

@@ -240,7 +240,8 @@ removeDefsMonadic targetNodes depMap eAnn = trace ("!!Removing monadic defs  \n\
         (\d@(GenericDef pat body ty) -> let
           newBody =
             if (trace ("\n Is Statement? " ++ show (isStateMonadFn ty)) $ isStateMonadFn ty)
-            then (monadRemoveStatements targetNodes depMap (functionBody body ))
+            then (monadRemoveStatements
+                    targetNodes depMap (functionArgsAndAnn body) (functionBody body ))
             else body
         in GenericDef pat newBody ty) defList
 
@@ -251,29 +252,60 @@ getAnn (A a _) = a
 -- | a mapping of nodes to nodes they are relevant to (result of our FP iteration)
 -- | and the body of a monadic function
 -- | Return that monadic function with irrelevant statements removed
-monadRemoveStatements :: [SDGNode] -> Map.HashMap SDGNode SDG -> LabeledExpr -> LabeledExpr
-monadRemoveStatements  targetNodes reachedNodesMap monadBody = trace "!!!MonadRemove"$
+monadRemoveStatements
+  :: [SDGNode]
+  -> Map.HashMap SDGNode SDG
+  -> [(Pattern, (Region, Label, Env Label))]
+  -> LabeledExpr
+  -> LabeledExpr
+monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trace "!!!MonadRemove"$
   let
     op = Var.Canonical (Var.Module ["State", "Escapable"] ) ("andThen")
-    (patStatements, lastStmt) = sequenceMonadic monadBody
+    taskStructure = sequenceMonadic monadBody
     --patLabels = map snd patStatements
     --allStatements = (map fst patStatements) ++ [lastStmt]
 
-    newList = filter
-      (\(stmt, (_,_)) -> let
+    cleanMonadic taskStruct = case taskStruct of
+      TSeq s1 _ s2 -> if (isRelevantStmt s1) then taskStruct else (cleanMonadic s2)
+      TCase e cases -> TCase e $ map (\(p,s) -> (p, cleanMonadic s)) cases
+      TBranch guardCases -> TBranch $ map (\(g,s) -> (g, cleanMonadic s)) guardCases
+      _ -> taskStruct
+
+    isRelevantStmt t = case t of
+      Task s -> isRelevant s
+      TSeq _ _ _  -> True
+      TCase e cases -> or $ map isRelevantStmt $ map snd cases
+      TBranch cases -> or $ map isRelevantStmt $ map snd cases
+
+    isRelevant stmt =
+      let
           --TODO check, is this right? Why don't we look at pattern?
            ourAssigns = [(SDGDef var compLab) |
                                      (SDGDef var compLab)<-Map.keys reachedNodesMap,
                                      compLab == getLabel stmt]--TODO make faster
            reachedNodes = Set.unions $ map
-             (\varNode -> case (trace "Map2" $ reachedNodesMap Map.! varNode) of
+             (\varNode -> case (reachedNodesMap Map.! varNode) of
                     x -> unSDG x) ourAssigns
            isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
-         in isRel ) patStatements
+       in isRel
+    cleanedStmt = cleanMonadic taskStructure
+    --Put our monadic statements back into functional form
+    reAssembleSeq :: TaskStructure -> LabeledExpr
+    reAssembleSeq t = case t of
+      (TSeq stmt (pat, expr) rest) ->
+         (A (getAnn expr) $ Binop op (reAssembleSeq stmt) (A (getAnn $ reAssembleSeq rest)
+                           $ Lambda pat $ reAssembleSeq rest))
+      (TBranch guardCases) ->
+         A (getAnn $ fst $ head guardCases) $ MultiIf $
+           map (\(g,s) -> (g, reAssembleSeq s)) guardCases
+      (TCase caseExp patSeqPairs) ->
+        A (getAnn caseExp) $ Case caseExp $ map (\(p,s) -> (p, reAssembleSeq s)) patSeqPairs
+      (Task s) -> s
+    
+    --Add our function arguments back
     reAssemble [] accum = accum
-    reAssemble ((stmt, (pat, expr)) : rest) accum =
-      reAssemble rest (A (getAnn expr) $ Binop op stmt (A (getAnn accum) $ Lambda pat accum))
-  in reAssemble (reverse newList) lastStmt
+    reAssemble ((argPat, ann):rest) accum = reAssemble rest $ A ann (Lambda argPat accum) 
+  in reAssemble argPatLabels $ reAssembleSeq cleanedStmt
 
 
 -- | Given the label for the RHS of a definition,

@@ -41,6 +41,54 @@ Forward Slicing Dead Code Elimination in Elm}
 
 \maketitle
 
+\section{Build Instructions}
+
+To build, you must have ghc and cabal installed and on your PATH.
+I built and tested with GHC 7.8.3, but I don't do anything too crazy with extensions,
+so it should work with older (or newer) versions.
+
+To compile and run my code, unzip the compressed folder, then:
+
+\begin{minted}[%mathescape,
+               %linenos,
+               %numbersep=5pt,
+               %gobble=2,
+               %frame=lines,
+               framesep=2mm]{bash}
+  cd elm-compiler
+  cabal sandbox init
+  cabal install ./elm-compiler.cabal
+  cabal install elm-make
+               
+\end{minted}
+
+It's important that you run the commands in this order: the Elm make tool, which actually generates JavaScript, depends on the elm-compiler library, so you must have my modified version installed before
+you install elm-make and elm-reactor from Hackage.
+The dependencies are quite large, so putting them in a sandbox will allow you to remove them when you
+are finished.
+
+Note that there's quite a few dependencies for the 
+Because of this, I've included Linux and Windows binaries in the elm-compiler directory. %TODO this
+
+To build the tests, for example, SyntaxTest.elm:
+
+\begin{minted}[%mathescape,
+               %linenos,
+               %numbersep=5pt,
+               %gobble=2,
+               %frame=lines,
+               framesep=2mm]{bash}
+  cd apaTests
+  ../.cabal-sandbox/bin/elm-make SyntaxTest.elm --output=SyntaxTest.html --yes
+               
+\end{minted}
+
+Then open SyntaxTest.html in your browser.
+The first time you run a test, Elm will install its core libraries in the current directory.
+The JavaScript output for a module is stored in apaTests/elm-stuff/build-artifacts/USER/PROJECT/1.0.0/ModuleName.elmo. The generated JavaScript is actually fairly readable, and shows the results of
+my slicing quite easily.
+
+
 \section{Control Flow}
 
 One of the more challenging parts of this assignment was constructing the control-flow graph for a functional program.
@@ -126,13 +174,16 @@ My analysis has the following limitations:
   Higher order code and closures are not supported. The analysis fails if a function is applied to fewer than its full set of arguments, or if a lambda is ever encountered in code.
 \item
   Imperative (monadic) code requires that references always be variables. This basically means that the analysis supports mutable variables, but not pointers/references.
+\item Monadic functions must have explicit type signatures provided.
 \item
   The analysis is only applied within a module. External calls to pure functions are assumed to have no kills or gens. This is safe because Elm doesn't allow dependency cycles, meaning external calls can't refer to variables within our module. For external calls in monadic code, the kill-set is assumed to be empty, but the gen-set is assumed to contain all references passed to the function. This provides a safe over-approximation of which definitions reach given statements. TODO this
 \end{itemize}
 
 If the analysis fails at any point, the original module is returned, so the results should always be safe, if not optimal.
 
-\section{Code Structure}
+\section{Code Architecture}
+
+The code is contained in the /src directory.
 
 My changes are contained in the Optimize module, which did not exist previously in Elm. The modules contained there are:
 
@@ -159,7 +210,7 @@ My changes are contained in the Optimize module, which did not exist previously 
   Optimize.SDG: contains the functions which, given reaching definition information, form the System Dependence Graph for a module. Edges are followed transitively using the worklist algorithm. Functions to remove irrelevant definitions from a module are also contained here.
 \end{itemize}
 
-The only other changes to the code are minor (i.e.~adding Show instances), and the addition of the optimization stage to Elm.Compiler.hs.
+The only other changes to the code are minor (i.e. adding Show instances), and the addition of the optimization stage to Elm.Compiler.hs.
 
 \section{Examples}
 
@@ -169,58 +220,13 @@ Below is an Elm module, containing the main syntactic constructs of the language
 Definitions that should be removed are named $vRel, vRel1$, etc. Those that should be removed are named
 $vNotRel$ and so on.
 
-\begin{multicols}{2}
 \inputminted{elm}{apaTests/SyntaxTest.elm}
-\end{multicols}
 
 Examining the JavaScript output of the original Elm compiler, and our modified version,
 we get the following diff:
 
 
-\begin{minted}[%mathescape,
-               %linenos,
-               %numbersep=5pt,
-               %gobble=2,
-               %frame=lines,
-               framesep=2mm]{udiff}
-            
-  30d29
-  <             var vNotRel1 = _L.fromArray([0]);
-  35,37d33
-  <          var vNotRel2 = A2($Basics._op["++"],
-  <          vRel4,
-  <          vRel1);
-  48,50d43
-  <          var vNotRel = {_: {}
-  <                        ,x: y
-  <                        ,y: x};
-  70d62
-  <       var vNotRel = vRel1 + vRel2;
-  76d67
-  <          var vNotRel = vRel1 + 10;
-  85d75
-  <          var vNotRel1 = x + z;
-  87d76
-  <          var vNotRel2 = vRel + vNotRel1;
-  92,95d80
-  <       var vNotRel = A3(multiArgFun,
-  <       5,
-  <       6,
-  <       7);
-  111,117d95
-  <          var vNotRel = function () {
-  <             switch (maybeX.ctor)
-  <             {case "Just": return maybeX._0;
-  <                case "Nothing": return 100;}
-  <             _U.badCase($moduleName,
-  <             "between lines 14 and 17");
-  <          }();
-  123,124d100
-  <          var vNotRel = _U.cmp(x,
-  <          10) < 0 ? $Maybe.Just(100) : $Maybe.Nothing;
-            
-               
-\end{minted}  
+\inputminted{diff}{apaTests/SyntaxTest.diff}
 
 By looking at this diff, we can see that the only lines removed are definitions of our irrelevant variables.          
 
