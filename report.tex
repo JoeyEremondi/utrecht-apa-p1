@@ -122,7 +122,33 @@ My modified Elm compiler performs dead code removal. Monotone Frameworks are use
 
 \subsection{Reaching Definitions}
 
-First, Reaching Definition Analysis is performed. The analysis follows the dataflow equations given in TODO Cite, with some small modifications. TODO equations. First, the iota value has been changed to bottom. This is because, in Elm, variables are never undefined. Even in imperative, monadic code, an initial value must be given. Thus, there is never a point where a free variable has an undefined value. Secondly, the analysis has been made interprocedural, with the following lifted transfer functions: TODO equations Finally, after the fixed-point of the transfer function is found, we look at the reaching definitions for each expression, and remove definitions of variables not referenced in that expression.
+First, Reaching Definition Analysis is performed. The analysis follows the dataflow equations given in TODO Cite, with some small modifications:
+
+\begin{eqnarray}
+ RDef_{\circ}(l) & = & \bigsqcup \set{RDef_\bullet(l') \sst (l',l) \in CFG} 
+   %\sqcup \set{\iota \sst l \in E}
+        \nonumber \\
+    RDef_{\bullet}(l) & = &  \hat{f_l}(RDef_\circ(l))  \nonumber \\
+    RDef_{\bullet}(l_{return}) & = 
+      &  \hat{f^2_{lcall, lreturn}}(RDef_\circ(lcall), RDef_\circ(lreturn))  \nonumber \\
+    {f_l}(A) & = & (A \setminus kill(l)) \cup gen(l) \nonumber \\
+   kill(l) & = & \set{(var, l') \sst l \text{ is an assignment to } var } \nonumber \\
+   gen(l) & = & \set{(var, l) \sst l \text{ is an assignment to } var } \nonumber \\
+   \hat{f_l}(\hat{A}) & = &  (f_l \circ \hat{A}) \text{ for non-procedural nodes }\nonumber \\
+   \hat{f_{lcall}}(\hat{A}) & = & \lambda \delta \rightarrow
+       \bigsqcup \set{\hat{A}(\delta') \sst (lcall : \delta') = \delta, \delta' \text{a valid call string of length } \leq k } \nonumber \\
+   \hat{f_{lreturn}}(\hat{A_c}) & = &  TODO  \nonumber \\
+\end{eqnarray}
+%\begin{eqnarray}
+%      
+%      RDef_{\circ}(label) & = & \bigsqcup \set{RDef_\bullet(l') \sst (l',l) \in CFG} 
+%        \sqcup \set{\iota \sst l \in E}  \\\\
+%      RDef_{\bullet l}(A) & = &  (RDef_\circ(A) \setminus kill()) \cup gen()
+%    \end{eqnarray}
+
+
+First, our iota value is the empty set. This is because, in Elm, variables are never undefined. Even in imperative, monadic code, an initial value must be given when creating a reference.
+Thus, there is never a point where a free variable has an undefined value. Secondly, the analysis has been made interprocedural, with the following lifted transfer functions: TODO equations Finally, after the fixed-point of the transfer function is found, we look at the reaching definitions for each expression, and remove definitions of variables not referenced in that expression.
 
 The result of this analysis is the set, for each program point, of relevant definitions: definitions whose values reach, and are used in, an expression.
 
@@ -134,7 +160,7 @@ This analysis has the following properties:
 \item
  \textit{Context-sensitive:} call-strings of fixed length are taking into account for interprocedural analysis 
 \item
- \textit{Flow-sensitive:} TODO 
+ \textit{Flow-sensitive:} The ordering of the  statements is taken into account when constructing the control flow graph.
 \item
  \textit{May:} the join in our lattice of results is simply set union.
 
@@ -145,7 +171,7 @@ This analysis has the following properties:
 The actual program slicing is performed using a System Dependence Graph. Each program point has a node in the SDG. An edge $(B,C)$ will be between nodes $B$ and $C$ for one of four reasons:
 \begin{itemize}
 \item $C$ is data-dependent on a variable that $B$ defines. That is, $B$ was a relevant definition in the result of our first analysis for $C$. 
-\item $C$ is control-dependent on $B$. TODO
+\item $B$ is a case or branch statement, and $C$ is a branch of $B$ (control-dependency). This is only relevant in monadic code, since functional branching dependencies are captured as data dependencies.
 \item $B$ is a call node for function $f$, and $C$ is the Proc-entry node for $f$ 
 \item $B$ is the Proc-exit node for function $f$, and $C$ is the return node for a call to $f$
 \end{itemize} 
@@ -159,7 +185,7 @@ The analysis has the following properties:
 \begin{itemize}
 \item \textit{Backwards:} relevance as a property flows backwards along SDG edges.
 \item \textit{Context-sensitive:} all-strings of fixed length are taking into account for interprocedural analysis.
-\item \textit{Flow-sensitive:} TODO
+\item \textit{Flow-sensitive:} The ordering of the  statements is taken into account when constructing the control flow graph, which in turn affects the dependency graph.
 \item \textit{May:} the lattice join operator is set union.
 \end{itemize}
 
@@ -225,10 +251,25 @@ $vNotRel$ and so on.
 Examining the JavaScript output of the original Elm compiler, and our modified version,
 we get the following diff:
 
+Running the code, we get the following output:
+
+%TODO output
+
+The important detail here is that no ``variable not found" exceptions
+were thrown in JavaScript, meaning that relevant definitions were not removed
+from the pure code.
+
+
 
 \inputminted{diff}{apaTests/SyntaxTest.diff}
 
-By looking at this diff, we can see that the only lines removed are definitions of our irrelevant variables.          
+By looking at this diff, we can see that the only lines removed are definitions of our irrelevant variables.
 
+Another test module shows the correctness for imperative code. Here, `andThen` is Elm's version
+of Haskell's monadic bind operator $>>=$.
+
+\inputminted{elm}{apaTests/ImperativeTest.elm}          
+
+%TODO why one not removed?
                     
 \end{document}

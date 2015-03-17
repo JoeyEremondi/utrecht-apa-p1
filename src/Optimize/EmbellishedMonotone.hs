@@ -96,7 +96,7 @@ liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload (dom
           possibleEnds = filter isGoodEnd domain
         in 
            joinAll lat [lhat dPoss | dPoss <- possibleEnds])
-liftToFn _ _ _f fret resultMap rnode@(Return _ label) (EmbPayload (domain, lhat')) =
+liftToFn _ _ _f fret resultMap rnode@(Return _ _ label) (EmbPayload (domain, lhat')) =
   let
     (EmbPayload (_, lhat)) = (resultMap Map.! (Call label) )
   in EmbPayload (domain,

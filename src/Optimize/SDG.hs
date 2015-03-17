@@ -65,7 +65,7 @@ toSDG :: LabelNode -> SDGNode
 toSDG lnode = case lnode of
   Assign var label -> SDGDef var label
   Call _ -> SDGFunction lnode
-  Return _ _ -> SDGFunction lnode
+  Return _ _ _ -> SDGFunction lnode
   ProcEntry _ -> SDGFunction lnode
   ProcExit _ -> SDGFunction lnode
   _ -> SDGLabel $ getNodeLabel lnode
@@ -103,7 +103,7 @@ transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = ca
     lc:d' -> let
         possibleEnds = [ldom | ldom <- domain, (take contextDepth (lc:ldom)) == (lc:d') ]
       in joinAll lat [pl dPoss | dPoss <- possibleEnds]) )
-  SDGFunction (Return fn l) -> let
+  SDGFunction (Return fn _ l) -> let
       (EmbPayload (domain2, lcall)) = trace "Map1" $ resultDict Map.! (SDGFunction $ Call l)
     in EmbPayload (domain,  \d ->
      (lcall d) `latticeJoin` (pl ((SDGFunction $ Call l):d) ) )
@@ -116,7 +116,7 @@ transferFun Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = lhat
 isFunctionEdge :: (LabelNode, LabelNode) -> Bool
 isFunctionEdge edge = case edge of
   (Call _, ProcEntry _ ) -> True
-  (ProcExit _, Return _ _ ) -> True
+  (ProcExit _, Return _ _ _ ) -> True
   _ -> False
 
 -- | Given a CFG edge, make an SDG edge for the special function action of the edge
@@ -218,7 +218,9 @@ removeDefs targetNodes depMap eAnn =
         case eToTrans of
           Let defs defBody -> let
               newDefs = (filter (defIsRelevant defLab targetNodes depMap ) defs)
-             in A ann $ Let (newDefs) defBody
+             in case newDefs of
+                     [] -> defBody
+                     _ -> A ann $ Let (newDefs) defBody
           _ -> A ann eToTrans ) eAnn
 
 {-|

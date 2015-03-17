@@ -90,7 +90,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
       let defs = defsFromModuleExpr eAnn
       --let (A _ (Let defs _)) = eAnn
       let fnLabels = map (\(GenericDef _ (A (_, l, _ ) _) _) -> l ) defs
-      let fnInfo = trace ("#####Fn labels " ++ show fnLabels  ) foldr (\(GenericDef (Pattern.Var n) fnDef _ ) finfo ->
+      let fnInfo = trace ("#####Fn labels " ++ show fnLabels  ) foldr (\(GenericDef (Pattern.Var n) fnDef fnTy ) finfo ->
               NormalMap.insert (nameToCanonVar n)
               (FunctionInfo
                (getArity fnDef)
@@ -98,6 +98,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
                (Just $ ProcEntry fnDef)
                (Just $ ProcExit fnDef)
                (Just $ getLabel fnDef)
+               fnTy --TODO type
               ) finfo) initFnInfo defs
       (headDicts, tailDicts, edgeListList ) <- trace "Getting all edges" $ unzip3 `fmap` forM defs (allDefEdges fnInfo)
       let headDict = trace "Getting head dict" $ IntMap.unions headDicts
@@ -179,7 +180,7 @@ isExprRef fnInfo exprs lnode (vplus,  _) = let
         --check if we reference the function called --TODO more advanced?
         (expContainsVar e v) || case (lnode, topFnLabel `fmap` NormalMap.lookup v fnInfo) of
           (ProcExit l1, Just ( Just l2)) -> l1 == l2
-          (Return v2 _, _ ) -> v == v2
+          (Return v2 _ _, _ ) -> v == v2
           _ -> False
 
       ActualParam l -> expContainsLabel e l
@@ -257,6 +258,7 @@ gens :: LabelNode -> HSet.HashSet RDef
 gens (Assign !var !label) = HSet.singleton (var, label)
 gens (AssignParam !var _ !label) = HSet.singleton (var, label)
 gens (ExternalCall v l) = HSet.singleton (FormalReturn v, l)
+gens (Return _ refs label) = HSet.fromList $ map (\ref -> (ref, label)) refs
 gens _ = HSet.empty
 
 

@@ -48,13 +48,12 @@ data ControlNode' expr =
   | Assign VarPlus (expr)
     --Used for special cases where we assign to internal values, like params or return value
   | AssignParam VarPlus VarPlus (expr) 
-  | Call (expr)
-  | Return Var (expr)
+  | Call  (expr) --list maping Input references to Formal args
+  | Return Var [VarPlus] (expr)
   | ProcEntry (expr)
   | ProcExit (expr)
   | ExprEval (expr)
   | ExternalCall Var (expr)
-  | ExternalStateCall Var [VarPlus] (expr)
     deriving (Functor, Eq, Ord, Show)
 
 {-|
@@ -85,12 +84,11 @@ instance Hashable LabelNode where
 getNodeLabel :: ControlNode' Label -> Label
 getNodeLabel (Branch n) = n
 getNodeLabel (ExternalCall _ l) = l
-getNodeLabel (ExternalStateCall _ _ l) = l
 getNodeLabel (Assign _ n2) = n2
 getNodeLabel (AssignParam _ _ n2) = n2
 getNodeLabel (ExprEval n) = n
 getNodeLabel (Call n) = n
-getNodeLabel (Return _ n2) = n2
+getNodeLabel (Return _ _ n2) = n2
 getNodeLabel (ProcEntry n) = n
 getNodeLabel (ProcExit n) = n
 --getNodeLabel _ = Label 0
@@ -122,7 +120,8 @@ data FunctionInfo =
     formalParams :: [VarPlus],
     entryNode    :: Maybe ControlNode,
     exitNode     :: Maybe ControlNode,
-    topFnLabel   :: Maybe Label
+    topFnLabel   :: Maybe Label,
+    fnType :: Maybe Type.CanonicalType
   } -- deriving (Eq, Ord, Show)
 
 
@@ -275,7 +274,13 @@ oneLevelEdges fnInfo e@(A (_, label, env) expr) maybeSubInfo = trace "One Level 
               argTails <-
                     mapM (labelLook tailMap) argList
               let callNode = Call e
-              let retNode = Return fnName e
+              let retNode = case (fnType thisFunInfo) of
+                    Nothing -> Return fnName [] e
+                    Just ty -> let
+                        tyList = functionParamTypes ty
+                        refs = [Ref v | (A _ (Var v), argTy) <- zip argList tyList,
+                                       isRefTy argTy]
+                      in Return fnName refs e
               --Generate assignment nodes for the actual parameters to the formals
               let assignFormalNodes =
                     map (\(formal, arg) ->
@@ -743,6 +748,10 @@ functionArgsAndAnn :: LabeledExpr -> [(Pattern, (Region, Label, Env Label))]
 functionArgsAndAnn (A ann (Lambda pat e)) = [(pat, ann)] ++ (functionArgsAndAnn e) 
 functionArgsAndAnn _ = []
 
+functionParamTypes :: Type.CanonicalType -> [Type.CanonicalType]
+functionParamTypes (Type.Lambda arg ret) = [arg] ++ functionParamTypes ret
+functionParamTypes _ = []
+
 -- | Get the "final" return type of a function type
 -- | i.e. what's returned if it is fully applied
 functionFinalReturnType :: Type.CanonicalType -> Type.CanonicalType
@@ -854,6 +863,11 @@ specialFnEdges fnInfo (headMap, tailMap) e@(A _ expr) = do
 isArith :: Var -> Bool
 isArith = (`elem` arithVars )
 
+isRefTy :: Type.CanonicalType -> Bool
+isRefTy (Type.App (Type.Var n) _) =
+  n ==  "StateRef"
+isRefTyp _ = False
+
 -- | The list of binary operators with arithmetic values, who we can treat as instructions
 -- | and not as function calls
 arithVars = [
@@ -906,7 +920,8 @@ interfaceFnInfo interfaces = let
                        formalParams = fParams, -- [VarPlus],
                        entryNode = Nothing, -- :: ControlNode,
                        exitNode = Nothing, -- :: ControlNode,
-                       topFnLabel = Nothing })) nameSets
+                       topFnLabel = Nothing,
+                       fnType = Map.lookup fnName (Module.iTypes iface)})) nameSets
 
 -- |If a function name starts with a capital letter, it's a constructor
 -- | So we don't do anything control flowy, we just package the values
