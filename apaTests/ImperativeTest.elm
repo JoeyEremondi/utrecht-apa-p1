@@ -17,7 +17,7 @@ controlDepTest x =
      ) `andThen` \_ ->
    deRef ref
 
-{-
+
 basicStateTest : Int -> Maybe a -> EState ph Int
 basicStateTest x y =
   (if (x <= 0)
@@ -44,11 +44,11 @@ stateFnCaller x =
   newRef 100 `andThen` \ref ->
   stateFn x ref `andThen` \_ ->
   deRef ref 
--}
+
 main = 
   flow down
     [ 
       asText <| runState <| controlDepTest -100
-      -- asText <| runState <| basicStateTest 10 (Just 20)
-      --, asText <| runState <| stateFnCaller 20
+      ,asText <| runState <| basicStateTest 10 (Just 20)
+      , asText <| runState <| stateFnCaller 20
     ]

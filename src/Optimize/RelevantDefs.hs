@@ -136,12 +136,12 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
         applyContext (EmbPayload (_,lhat)) = joinAll normalLat $ map (\d -> lhat d ) domain
         --theDefs = Map.map applyContext theDefsHat
         theDefs = theDefsHat
-        relevantDefs = trace ("\n\nTheDefs \n\n" ++ (show theDefs) ++ "\n\n\n" ) $ Map.mapWithKey
+        relevantDefs =  Map.mapWithKey
                        (\x (ReachingDefs s) ->
                          HSet.filter (isExprRef fnInfo expDict x) s) theDefs
         controlEdges =
           [(Branch l, edgeMap pinfo (Branch l)) | Branch l <- allLabels pinfo ]
-      in trace ("\n\nRelevant Defs \n\n" ++ show relevantDefs )$ Just (pinfo, relevantDefs, targetNodes, controlEdges)
+      in Just (pinfo, relevantDefs, targetNodes, controlEdges)
 
 -- | Useful for debugging
 instance Show (ProgramInfo LabelNode) where
