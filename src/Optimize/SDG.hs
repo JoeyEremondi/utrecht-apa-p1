@@ -1,3 +1,8 @@
+{-Joseph Eremondi UU# 4229924
+  Utrecht University, APA 2015
+  Project one: dataflow analysis
+  March 17, 2015 -}
+
 {-# LANGUAGE RecordWildCards #-}
 module Optimize.SDG (removeModuleDeadCode) where
 
@@ -5,9 +10,9 @@ import           AST.Annotation               (Annotated (..))
 import qualified AST.Expression.Canonical     as Canon
 import           AST.Expression.General
 import qualified AST.Module                   as Module
+import qualified Data.HashMap.Strict          as Map
 import qualified Data.List                    as List
-import qualified Data.HashMap.Strict                     as Map
-import qualified Data.Map as NormalMap
+import qualified Data.Map                     as NormalMap
 import qualified Data.Set                     as Set
 import           Elm.Compiler.Module
 import           Optimize.Traversals
@@ -20,16 +25,16 @@ import           Optimize.Types
 
 import qualified AST.Variable                 as Var
 
+import           Data.Hashable
 import           Optimize.ControlFlow
 import           Optimize.EmbellishedMonotone
 import           Optimize.RelevantDefs
-import Data.Hashable
 
-import qualified Data.HashSet as HSet
+import qualified Data.HashSet                 as HSet
 
 --import Optimize.Reachability (reachabilityMap)
 
-import           Debug.Trace                  (trace)
+--import           Debug.Trace                  (trace)
 --trace _ x = x
 
 
@@ -104,7 +109,7 @@ transferFun lat@Lattice{..} resultDict lnode lhat@(EmbPayload (domain, pl)) = ca
         possibleEnds = [ldom | ldom <- domain, (take contextDepth (lc:ldom)) == (lc:d') ]
       in joinAll lat [pl dPoss | dPoss <- possibleEnds]) )
   SDGFunction (Return fn _ l) -> let
-      (EmbPayload (domain2, lcall)) = trace "Map1" $ resultDict Map.! (SDGFunction $ Call l)
+      (EmbPayload (domain2, lcall)) = resultDict Map.! (SDGFunction $ Call l)
     in EmbPayload (domain,  \d ->
      (lcall d) `latticeJoin` (pl ((SDGFunction $ Call l):d) ) )
   _ -> lhat
@@ -144,13 +149,13 @@ sdgProgInfo initFnInfo names eAnn = do
             (\n rdSet -> [(SDGDef var def, toSDG n) | (var,  def) <- (HSet.toList rdSet)] ) relevantDefs
     let controlEdges = [(toSDG nBranch, toSDG nDep) |
                          (nBranch, subList) <- rawControlEdges,
-                         nDep <- subList] 
+                         nDep <- subList]
     let originalLabels = map toSDG $ Map.keys relevantDefs
     --If n1 depends on def at label lab, then we have lab -> n1 as dependency
     --TODO is this right?
     --let dataEdges = map (\(n1, lab) -> (SDGLabel lab, toSDG n1)  ) relevantDefEdges
     let allEdges =  List.nub $ callEdges ++ controlEdges ++ dataEdges
-    let sdgTargets = trace ("SDG Edges " ++ show allEdges )$ makeTargetSet $ Set.fromList targetNodes
+    let sdgTargets =  makeTargetSet $ Set.fromList targetNodes
     let pinfo =
           ProgramInfo {
             edgeMap = \lnode -> [l2 | (l1, l2) <- allEdges, l1 == lnode], --TODO make faster
@@ -184,8 +189,8 @@ removeDeadCode
     -> Canon.Expr
     -> Canon.Expr
 removeDeadCode initFnInfo targetVars e = case dependencyMap of
-  Nothing -> trace "!!! Couldn't Optimize" e
-  Just (depMap, targetNodes) -> trace "Opt Success" $ toCanonical
+  Nothing -> e
+  Just (depMap, targetNodes) ->  toCanonical
        $ removeDefs targetNodes depMap eAnn
     -- $ removeDefs (toDefSet depMap targetNodes) eAnn --TODO
   where
@@ -232,7 +237,7 @@ removeDefsMonadic
   -> Map.HashMap SDGNode SDG
   -> LabeledExpr
   -> LabeledExpr
-removeDefsMonadic targetNodes depMap eAnn = trace ("!!Removing monadic defs  \n\n" ) $ case eAnn of
+removeDefsMonadic targetNodes depMap eAnn = case eAnn of
   (A ann (Let defs body)) ->
     let
       newDefs = (cleanDefs defs)
@@ -244,7 +249,7 @@ removeDefsMonadic targetNodes depMap eAnn = trace ("!!Removing monadic defs  \n\
         map
         (\d@(GenericDef pat body ty) -> let
           newBody =
-            if (trace ("\n Is Statement? " ++ show (isStateMonadFn ty)) $ isStateMonadFn ty)
+            if (isStateMonadFn ty)
             then (monadRemoveStatements
                     targetNodes depMap (functionArgsAndAnn body) (functionBody body ))
             else body
@@ -263,14 +268,14 @@ monadRemoveStatements
   -> [(Pattern, (Region, Label, Env Label))]
   -> LabeledExpr
   -> LabeledExpr
-monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trace "!!!MonadRemove"$
+monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody =
   let
     op = Var.Canonical (Var.Module ["State", "Escapable"] ) ("andThen")
     taskStructure = sequenceMonadic monadBody
     --patLabels = map snd patStatements
     --allStatements = (map fst patStatements) ++ [lastStmt]
 
-    cleanMonadic taskStruct = trace "Clean monadic" $ case taskStruct of
+    cleanMonadic taskStruct = case taskStruct of
       TSeq expr s1 pat s2 -> if (isRelevantStmt  s1 )
                             then TSeq expr (cleanMonadic s1) pat (cleanMonadic s2)
                             else (cleanMonadic s2)
@@ -279,23 +284,23 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
       TLet e1 defs s -> TLet e1 defs $  cleanMonadic s
       _ -> taskStruct
 
-    
-    isRelevantStmt t = trace "Is Relevant?" $ case t of
-      Task s -> trace ("Is rel stmt? " ++ show ( writeIsRelevant  (getLabel s) ) ) $ writeIsRelevant  (getLabel s)
-      TSeq exp s1 pat s2  -> trace ("Is rel result? " ++ show (resultIsRelevant pat (getLabel exp) )) $  (resultIsRelevant pat (getLabel exp) ) ||
+
+    isRelevantStmt t = case t of
+      Task s -> writeIsRelevant  (getLabel s)
+      TSeq exp s1 pat s2  -> (resultIsRelevant pat (getLabel exp) ) ||
         (isRelevantStmt  s1) || (isRelevantStmt s2)
-      TCase expr e cases -> trace "TCase rel" $ or $ map (isRelevantStmt ) $ map snd cases
-      TBranch expr cases -> trace "IfCase rel" $ or $ map (isRelevantStmt ) $ map snd cases
-      TCall _ expr -> trace "Call rel" $ True --TODO more fine grained?
+      TCase expr e cases ->  or $ map (isRelevantStmt ) $ map snd cases
+      TBranch expr cases ->  or $ map (isRelevantStmt ) $ map snd cases
+      TCall _ expr ->  True --TODO more fine grained?
       TLet _ _ s -> isRelevantStmt s
-      
+
 
     writeIsRelevant  label =
       let
           --TODO check, is this right? Why don't we look at pattern?
            --definedVars =  getPatternVars `fmap` maybePat
            --patAssigns =[SDGDef (NormalVar var label) label | var <- definedVars]
-           ourAssigns =  
+           ourAssigns =
              [(SDGDef var compLab) |
                                      (SDGDef var compLab)<-Map.keys reachedNodesMap,
                                      compLab == label]
@@ -306,7 +311,7 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
              (\varNode -> case (reachedNodesMap Map.! varNode) of
                     x -> unSDG x) ourAssigns
            isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
-       in  trace ("Write relevant? " ++ show isRel ++ " " ++ show label  ++ "\nSets " ++ show reachedNodes ) $ isRel
+       in  isRel
 
     resultIsRelevant pat label =
       let
@@ -321,8 +326,8 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
              (\varNode -> case (reachedNodesMap Map.! varNode) of
                     x -> unSDG x) ourAssigns
            isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
-       in  trace ("Result relevant? " ++ show isRel ++ " " ++ show label ++ " " ++ show pat ++ "\nSets " ++ show reachedNodes ) $ isRel
-           
+       in isRel
+
     cleanedStmt = cleanMonadic taskStructure
     --Put our monadic statements back into functional form
     reAssembleSeq :: TaskStructure -> LabeledExpr
@@ -338,10 +343,10 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
       (Task s) -> s
       (TLet e defs s) -> A (getAnn e) $ Let defs $ reAssembleSeq s
       (TCall _ s) -> s
-    
+
     --Add our function arguments back
     reAssemble [] accum = accum
-    reAssemble ((argPat, ann):rest) accum = reAssemble rest $ A ann (Lambda argPat accum) 
+    reAssemble ((argPat, ann):rest) accum = reAssemble rest $ A ann (Lambda argPat accum)
   in reAssemble (reverse argPatLabels) $ reAssembleSeq cleanedStmt
 
 
@@ -362,14 +367,14 @@ defIsRelevant defLabel targetNodes reachedNodesMap (GenericDef pat expr _ty) = l
                   Nothing -> Set.empty) nodesForDefs
                   -- EmbPayload _ lhat -> unSDG $ lhat []) nodesForDefs
         isRel = not $ Set.null $ (Set.fromList targetNodes) `Set.intersection` reachedNodes
-      in trace ("Testing if " ++ show pat ++ " is relevant\n" ++ (show $ Set.fromList targetNodes) ++ "\n" ++ show reachedNodes ++ ("Nodes for def " ++ show definedVars ++ " : " ++ show nodesForDefs) ) $ isRel
+      in isRel
 
 
 
 -- | Given interfaces of imported modules, a module and its interface
 -- | Perform dead code elimination on that module
 removeModuleDeadCode :: ModuleOptFun
-removeModuleDeadCode otherIfaces modName  (modul, iface) = trace (show modName) $ let
+removeModuleDeadCode otherIfaces modName  (modul, iface) =  let
     fnInfo = interfaceFnInfo otherIfaces
     isValue value = case value of --TODO remove
       Variable.Value s -> True

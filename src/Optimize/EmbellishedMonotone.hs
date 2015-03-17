@@ -1,3 +1,8 @@
+{-Joseph Eremondi UU# 4229924
+  Utrecht University, APA 2015
+  Project one: dataflow analysis
+  March 17, 2015 -}
+
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -12,12 +17,10 @@ import           Optimize.MonotoneFramework
 import           Optimize.Traversals
 import           Optimize.Types
 
-import qualified Data.Map as NormalMap
-
-import           Debug.Trace                (trace)
+import qualified Data.Map                   as NormalMap
 
 
-import qualified Data.HashMap.Strict                   as Map
+import qualified Data.HashMap.Strict        as Map
 
 newtype EmbPayload a b = EmbPayload ([[a]], ([a] -> b))
 
@@ -94,7 +97,7 @@ liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload (dom
   EmbPayload (domain, \d ->  let
           isGoodEnd dposs = (take depth (Call label:dposs)) == d
           possibleEnds = filter isGoodEnd domain
-        in 
+        in
            joinAll lat [lhat dPoss | dPoss <- possibleEnds])
 liftToFn _ _ _f fret resultMap rnode@(Return _ _ label) (EmbPayload (domain, lhat')) =
   let

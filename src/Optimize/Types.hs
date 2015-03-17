@@ -1,18 +1,23 @@
-{-# LANGUAGE FlexibleInstances  #-}
-{-# LANGUAGE OverlappingInstances  #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-Joseph Eremondi UU# 4229924
+  Utrecht University, APA 2015
+  Project one: dataflow analysis
+  March 17, 2015 -}
+
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE OverlappingInstances #-}
+{-# LANGUAGE StandaloneDeriving   #-}
 module Optimize.Types where
 -- |A central place to put types and definitions
 -- | to avoid dep cycles
 
-import qualified AST.Annotation           as Annotate
+import qualified AST.Annotation         as Annotate
 import           AST.Expression.General
-import qualified AST.Pattern              as Pattern
-import           AST.Type                 as CanonicalType
-import qualified AST.Variable             as Var
-import qualified Data.Map                 as Map
-import qualified Elm.Compiler.Module      as PublicModule
-import           Text.PrettyPrint         as P
+import qualified AST.Pattern            as Pattern
+import           AST.Type               as CanonicalType
+import qualified AST.Variable           as Var
+import qualified Data.Map               as Map
+import qualified Elm.Compiler.Module    as PublicModule
+import           Text.PrettyPrint       as P
 
 import           AST.PrettyPrint
 

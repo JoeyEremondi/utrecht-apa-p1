@@ -1,3 +1,8 @@
+{-Joseph Eremondi UU# 4229924
+  Utrecht University, APA 2015
+  Project one: dataflow analysis
+  March 17, 2015 -}
+
 {-# LANGUAGE DeriveFunctor      #-}
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -22,15 +27,14 @@ import qualified AST.Module               as Module
 import qualified AST.Pattern              as Pattern
 import qualified AST.Type                 as Type
 import qualified AST.Variable             as Var
+import qualified Data.IntMap              as IntMap
 import qualified Data.Map                 as Map
-import qualified Data.IntMap                 as IntMap
 
-import Debug.Trace (trace)
-import qualified Data.List as List
+import qualified Data.List                as List
 
 
 import           Optimize.Types
-{-| 
+{-|
 Given:
 A function producing a new context for each child expression or def
    (this is always safe if the list is infinite)
@@ -224,7 +228,7 @@ makeListLabels init = tformE
   (\_ (l) -> map (\i -> [i]++l) [1..] )
   (init)
   ( (\c a -> (a,c)), \lab -> tformDef (makeListLabels lab), cid,
-    \lab exp -> trace ("Giving label " ++ show lab ++ " to expr "  ) $ exp)
+    \lab exp -> exp)
 
 {-|
 Given an expression, assign a unique integer label to each of its sub-expressions.
@@ -243,7 +247,7 @@ makeLabels e =
       (\(GenericDef _ e v) -> [e])
       (\ _ (A (a,c) _) subs -> [c] ++  (concat subs))
       listLabeled
-    labelMap = trace ("Number of labels " ++ show (length allLabels) ++ " num unique " ++ show (length $ List.nub allLabels) ) $ Map.fromList $ zip allLabels [1..]
+    labelMap = Map.fromList $ zip allLabels [1..]
     switchToInt e = tformE
       (\ _ () -> repeat () )
       ()
@@ -271,7 +275,7 @@ addScope startEnv = tformE
             cid,
             cid)
 
--- | Get all variables defined in a definition 
+-- | Get all variables defined in a definition
 varsForDef :: GenericDef a Var -> [Var.Canonical]
 varsForDef (GenericDef p _e _v) = getPatternVars p
 

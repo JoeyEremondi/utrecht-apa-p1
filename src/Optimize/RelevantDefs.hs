@@ -1,9 +1,14 @@
+{-Joseph Eremondi UU# 4229924
+  Utrecht University, APA 2015
+  Project one: dataflow analysis
+  March 17, 2015 -}
+
+{-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE OverlappingInstances #-}
 {-# LANGUAGE StandaloneDeriving   #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE OverlappingInstances #-}
-{-# LANGUAGE BangPatterns #-}
 module Optimize.RelevantDefs (getRelevantDefs) where
 
 import           AST.Annotation               (Annotated (..))
@@ -11,10 +16,10 @@ import           AST.Annotation               (Annotated (..))
 import           AST.Expression.General
 import qualified AST.Pattern                  as Pattern
 import           Control.Monad
+import qualified Data.HashMap.Strict          as Map
+import qualified Data.IntMap                  as IntMap
 import qualified Data.List                    as List
-import qualified Data.HashMap.Strict                     as Map
-import qualified Data.Map as NormalMap
-import qualified Data.IntMap                     as IntMap
+import qualified Data.Map                     as NormalMap
 import qualified Data.Set                     as Set
 import           Optimize.Traversals
 
@@ -27,23 +32,15 @@ import           Optimize.Types
 import           AST.PrettyPrint              (pretty)
 import           Text.PrettyPrint.HughesPJ    (render)
 
-import qualified Data.HashSet as HSet
-import Data.Hashable 
+import           Data.Hashable
+import qualified Data.HashSet                 as HSet
 
-import           Optimize.ControlFlow         hiding (trace)
+import           Optimize.ControlFlow
 
-import System.IO.Unsafe (unsafePerformIO) --TODO remove
-
-import           Debug.Trace                  (trace)
---trace _ x = x
 
 --How long do we let our call strings be?
 contextDepth :: Int
 contextDepth = 2
-
--- | Insert all of the given key-element pairs into a dictionary
-insertAll :: (Hashable k, Eq k) => [(k,a)] -> Map.HashMap k a -> Map.HashMap k a
-insertAll pairs theMap = List.foldl' (\m (k,a) -> Map.insert k a m) theMap pairs
 
 
 {-
@@ -81,7 +78,7 @@ getRelevantDefs
            Map.HashMap LabelNode (HSet.HashSet (VarPlus, Label)),
            [LabelNode],
            [(LabelNode, [LabelNode])])
-getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
+getRelevantDefs  initFnInfo eAnn =
   let
     --TODO add info for external calls!
     maybeInfo = do
@@ -90,7 +87,7 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
       let defs = defsFromModuleExpr eAnn
       --let (A _ (Let defs _)) = eAnn
       let fnLabels = map (\(GenericDef _ (A (_, l, _ ) _) _) -> l ) defs
-      let fnInfo = trace ("#####Fn labels " ++ show fnLabels  ) foldr (\(GenericDef (Pattern.Var n) fnDef fnTy ) finfo ->
+      let fnInfo = foldr (\(GenericDef (Pattern.Var n) fnDef fnTy ) finfo ->
               NormalMap.insert (nameToCanonVar n)
               (FunctionInfo
                (getArity fnDef)
@@ -100,11 +97,11 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
                (Just $ getLabel fnDef)
                fnTy --TODO type
               ) finfo) initFnInfo defs
-      (headDicts, tailDicts, edgeListList ) <- trace "Getting all edges" $ unzip3 `fmap` forM defs (allDefEdges fnInfo)
-      let headDict = trace "Getting head dict" $ IntMap.unions headDicts
+      (headDicts, tailDicts, edgeListList ) <- unzip3 `fmap` forM defs (allDefEdges fnInfo)
+      let headDict = IntMap.unions headDicts
       let tailDict = IntMap.unions tailDicts
       functionEdgeListList <- forM defs (functionDefEdges (headDict, tailDict))
-      let !initialNodes = [ProcEntry (getLabel body)| (GenericDef (Pattern.Var n) body _ ) <- defs ]
+      let !initialNodes = [ProcEntry (getLabel body)| (GenericDef (Pattern.Var _) body _ ) <- defs ]
       let !controlEdges = concat $ edgeListList ++ functionEdgeListList
       let !edges = map (\(n1,n2) -> (getLabel `fmap` n1, getLabel `fmap` n2 ) ) controlEdges
       --edges = concat `fmap` edgeListList
@@ -113,18 +110,16 @@ getRelevantDefs  initFnInfo eAnn = trace "\nIn Relevant Defs!!!!" $
       let !targetNodes = map (\n -> ProcExit n ) fnLabels
       return $! (progInfo, allNodes, expDict, targetNodes, fnInfo, fnLabels)
   in case maybeInfo of
-    Nothing -> trace "Failed getting info" $ Nothing
+    Nothing -> Nothing
     Just (pinfo, allNodes, expDict, targetNodes, fnInfo, fnLabels) ->
       let
-        !intMap = Map.fromList $ zip allNodes [1..]
-        labelInfo cnode = show  cnode
-        nameMap = Map.mapWithKey
-          (\node _ -> ("Node: " ++ labelInfo node ) ++ "\n\n" ++
-            (render $ pretty $ (expDict IntMap.! ( getNodeLabel node) ) ) )  intMap
-        callGraphDot = (printGraph (intMap Map.!) (nameMap Map.!) pinfo)
-        !reachMap = trace ("Graph dot\n\n" ++ callGraphDot) $ unsafePerformIO $ do --TODO fix this
-          writeFile "./callGraph.dot" callGraphDot
-          return $ callGraph eAnn
+        -- !intMap = Map.fromList $ zip allNodes [1..]
+        -- labelInfo cnode = show  cnode
+        -- nameMap = Map.mapWithKey
+        --  (\node _ -> ("Node: " ++ labelInfo node ) ++ "\n\n" ++
+        --    (render $ pretty $ (expDict IntMap.! ( getNodeLabel node) ) ) )  intMap
+        -- callGraphDot = (printGraph (intMap Map.!) (nameMap Map.!) pinfo)
+        reachMap = callGraph eAnn
         domain =
           map (\d -> map Call d) $ contextDomain fnLabels contextDepth reachMap
         --freeVars = getFreeVars allNodes

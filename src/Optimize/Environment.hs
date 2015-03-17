@@ -1,3 +1,8 @@
+{-Joseph Eremondi UU# 4229924
+  Utrecht University, APA 2015
+  Project one: dataflow analysis
+  March 17, 2015 -}
+
 module Optimize.Environment where
 
 import           AST.Annotation

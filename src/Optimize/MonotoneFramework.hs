@@ -1,7 +1,9 @@
+{-Joseph Eremondi UU# 4229924
+  Utrecht University, APA 2015
+  Project one: dataflow analysis
+  March 17, 2015 -}
+
 {-# LANGUAGE RecordWildCards #-}
---Joseph Eremondi UU# 4229924
---Utrecht University, APA 2015
---Project one: dataflow analysis
 
 {-|
 General framework for constructing lattices and finding fixpoints
@@ -16,7 +18,7 @@ module Optimize.MonotoneFramework (
   printGraph
   )where
 
-import qualified Data.HashMap.Strict                          as Map
+import qualified Data.HashMap.Strict               as Map
 
 import qualified Data.Graph.Inductive.Graph        as Graph
 import qualified Data.Graph.Inductive.PatriciaTree as Gr
@@ -24,15 +26,12 @@ import qualified Data.Graph.Inductive.PatriciaTree as Gr
 import qualified Data.GraphViz                     as Viz
 import qualified Data.GraphViz.Attributes.Complete as VA
 import           Data.GraphViz.Printing            (renderDot)
-import Data.List (foldl')
+import           Data.List                         (foldl')
 
-import Data.Hashable
+import           Data.Hashable
 
 import           Data.Text.Lazy                    (pack, unpack)
 
---import Debug.Trace (trace)
---TODO remove
-trace _ x = x
 
 
 newtype FlowEdge label = FlowEdge (label, label)
@@ -108,30 +107,30 @@ minFP :: (Hashable label, Eq label, Show label, Show payload) =>
          -> (Map.HashMap label payload -> label -> payload -> payload)
          -> ProgramInfo label
          -> (Map.HashMap label payload, Map.HashMap label payload)
-minFP lat@(Lattice{..}) f info = trace ("In MinFP" ++ show (length $ labelPairs info) ) $ (mfpOpen, mfpClosed)
+minFP lat@(Lattice{..}) f info = (mfpOpen, mfpClosed)
   where
-    mfpClosed = trace "MinFP finished" $ Map.mapWithKey (f mfpOpen) mfpOpen
+    mfpClosed = Map.mapWithKey (f mfpOpen) mfpOpen
     --stResult :: ST s [(label, payload)]
     initialSolns = foldr (\l solnsSoFar ->
                              if isExtremal info l
-                             then trace ("Inserting iota " ++ show l ) $Map.insert l iota solnsSoFar
-                             else trace ("Inserting Bottom" ++ show l ) $ Map.insert l latticeBottom solnsSoFar
+                             then Map.insert l iota solnsSoFar
+                             else Map.insert l latticeBottom solnsSoFar
                            ) Map.empty (allLabels info)
-    mfpOpen = trace ("Initial solutions " ++ show (length $ labelPairs info)  ) $ iterateSolns initialSolns (labelPairs info)
-    iterateSolns currentSolns [] = trace "!!!!!!!Done FP Iter\n\n" $ currentSolns
-    iterateSolns currentSolns (cfgEdge:rest) = trace ("FP Iter" ++ show cfgEdge ) $ let
+    mfpOpen =  iterateSolns initialSolns (labelPairs info)
+    iterateSolns currentSolns [] = currentSolns
+    iterateSolns currentSolns (cfgEdge:rest) =  let
       flowEdge = getFlowEdge flowDirection cfgEdge
       (FlowEdge (l,l')) = flowEdge
       al = currentSolns Map.! l
       al' = currentSolns Map.! l'
       fal = f currentSolns l al
       (newPairs, newSolns) =
-        if (trace ("FP Comparing label\n" ++ (show l) ++ " to " ++ (show l') ) $ not $ fal `lleq` al')
-        then trace "Adding edge" $ let
+        if ( not $ fal `lleq` al')
+        then let
             theMap = Map.insert l' (latticeJoin fal al') currentSolns
             thePairs = map (\lNeighbour -> (l', lNeighbour) ) $ edgeMap info l'
           in (thePairs, theMap)
-        else trace "Didn't add a new edge " $ ([], currentSolns)
+        else ([], currentSolns)
       in iterateSolns newSolns (newPairs ++ rest)
 
 
