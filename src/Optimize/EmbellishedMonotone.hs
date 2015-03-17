@@ -1,3 +1,4 @@
+
 {-Joseph Eremondi UU# 4229924
   Utrecht University, APA 2015
   Project one: dataflow analysis
@@ -97,8 +98,10 @@ liftToFn depth lat@Lattice{..} f  _fret _resultMap (Call label) (EmbPayload (dom
   EmbPayload (domain, \d ->  let
           isGoodEnd dposs = (take depth (Call label:dposs)) == d
           possibleEnds = filter isGoodEnd domain
+          simpleMap = (error "Shouldn't use resultMap in non lifted this case" )
         in
-           joinAll lat [lhat dPoss | dPoss <- possibleEnds])
+           joinAll lat [f simpleMap (Call label) (lhat dPoss)
+                       | dPoss <- possibleEnds])
 liftToFn _ _ _f fret resultMap rnode@(Return _ _ label) (EmbPayload (domain, lhat')) =
   let
     (EmbPayload (_, lhat)) = (resultMap Map.! (Call label) )
