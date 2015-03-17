@@ -866,7 +866,7 @@ isArith = (`elem` arithVars )
 isRefTy :: Type.CanonicalType -> Bool
 isRefTy (Type.App (Type.Var n) _) =
   n ==  "StateRef"
-isRefTyp _ = False
+isRefTy _ = False
 
 -- | The list of binary operators with arithmetic values, who we can treat as instructions
 -- | and not as function calls
