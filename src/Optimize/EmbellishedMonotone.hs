@@ -145,12 +145,17 @@ generate the list of all valid call strings, up to the given length.
 contextDomain :: [Label] -> Int -> Map.HashMap Label [Label] -> [[Label]]
 contextDomain allLabels n callMap = helper n callMap ([[]] ++ map (\x -> [x]) allLabels)
   where
+    reverseCallEdges = [(called, caller)
+                       | caller <- Map.keys callMap, called <- callMap Map.! caller]
+    reverseCallMap = Map.fromList $ map
+      (\called -> (called, [caller | (someCalled, caller) <- reverseCallEdges,
+                           someCalled == called ])) allLabels
     --allLabelsWithExt = [externalCallLabel] ++ allLabels
     helper 0 _ _ = [[]]
     helper 1 _ accum = accum
     helper n callMap accum = let
-        oneLevelPaths = [ (l2:l1:callStr) |
+        oneLevelPaths = [ (l2:l1:callStr) | --For ease,we put called at the end, then reverse
                          (l1:callStr) <- accum,
-                         l2 <- (callMap Map.! l1)]
+                         l2 <- (reverseCallMap Map.! l1)]
         newAccum = List.nub $ accum ++ oneLevelPaths
-      in helper (n-1) callMap newAccum
+      in map reverse $ helper (n-1) callMap newAccum
