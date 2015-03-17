@@ -67,6 +67,7 @@ data TaskStructure =
   | TBranch LabeledExpr [(LabeledExpr, TaskStructure)]
   | TCase LabeledExpr LabeledExpr [(Pattern, TaskStructure)]
   | TCall LabeledExpr LabeledExpr
+  | TLet LabeledExpr [LabelDef] TaskStructure
     deriving (Show)
 
 -- | We use this to store nodes in a HashMap, hopefully
@@ -634,6 +635,48 @@ monadStructureEdges fnInfo taskStruct = trace  "MonStrucEdg" $
               , IntMap.insert ourLabel ourHead headMap
               , IntMap.insert ourLabel ourTail tailMap
               , subEdges)
+    TLet ourExp defs bodyStmt -> do
+      let getDefAssigns (GenericDef pat b _) =
+             (varAssign  pat) $ b
+      let defAssigns = map getDefAssigns defs
+      --let bodyAssigns = map (tailAssign $ getLabel e) $ tailExprs body
+      let rhses = map (\(GenericDef _ b _) -> b) defs
+      nonMonadicInfo <- mapM (allExprEdges fnInfo) rhses
+      let (headMap, tailMap, nonMonadEdges) =
+            List.foldl' (\ (headSoFar, tailSoFar, edgesSoFar) (h1,t1,e1) ->
+                     (IntMap.union headSoFar h1,
+                     IntMap.union tailSoFar t1,
+                     edgesSoFar ++ e1)) (IntMap.empty, IntMap.empty, [] ) $ nonMonadicInfo
+      
+
+      (ourHead:otherHeads) <-
+            mapM (\(GenericDef _ b _) -> labelLook headMap b) defs
+      rhsDefTails <-
+            mapM (\(GenericDef _ b _) -> labelLook tailMap b) defs
+
+      let lastAssignInDefs = map  (\defList->[last defList] ) defAssigns
+      let firstAssignInDefs = map (\defList->[head defList] ) defAssigns
+
+      (bodyHead, bodyTail, subHeads, subTails, monEdges) <-
+        monadStructureEdges fnInfo bodyStmt
+
+      --let ourTail = [Assign (IntermedExpr (getLabel e)) body]
+
+      let defTailToFirstAssignEdges =
+            concatMap connectLists $ zip rhsDefTails firstAssignInDefs
+      let assignWithinDefEdges =
+            concatMap (\assigns -> zip (tail assigns) (init assigns)) defAssigns 
+
+      let betweenDefEdges =
+            concatMap connectLists $ zip lastAssignInDefs (otherHeads ++ [bodyHead])
+      return $ (ourHead,
+                bodyTail,
+                IntMap.insert (getLabel ourExp) ourHead $ IntMap.union headMap subHeads,
+                IntMap.insert (getLabel ourExp) bodyTail $ IntMap.union tailMap subTails,
+                nonMonadEdges ++ monEdges ++ defTailToFirstAssignEdges
+                  ++ assignWithinDefEdges ++ betweenDefEdges
+
+        )
 
   
 
@@ -735,6 +778,8 @@ sequenceMonadic e@(A _ (Binop op e1 (A _ (Lambda pat body)) )) =
 --sequenceMonadic e@(A _ (App _ _)) = TCall e e
 sequenceMonadic e@(A _ (MultiIf guardCasePairs)) =
   TBranch e $ map (\(g, body) -> (g, (sequenceMonadic body))) guardCasePairs
+sequenceMonadic e@(A _ (Let defs body)) =
+  TLet e defs $ sequenceMonadic body
 sequenceMonadic e@(A _ (Case caseExp patCasePairs)) =
   TCase e caseExp $ map (\(pat, arm) -> (pat, sequenceMonadic arm)) patCasePairs
 sequenceMonadic e = Task e

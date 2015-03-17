@@ -274,6 +274,7 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
                             else (cleanMonadic s2)
       TCase expr e cases -> TCase expr e $ map (\(p,s) -> (p, cleanMonadic s)) cases
       TBranch expr guardCases -> TBranch expr $ map (\(g,s) -> (g, cleanMonadic s)) guardCases
+      TLet e1 defs s -> TLet e1 defs $  cleanMonadic s
       _ -> taskStruct
 
     
@@ -283,7 +284,8 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
         (isRelevantStmt  s1) || (isRelevantStmt s2)
       TCase expr e cases -> trace "TCase rel" $ or $ map (isRelevantStmt ) $ map snd cases
       TBranch expr cases -> trace "IfCase rel" $ or $ map (isRelevantStmt ) $ map snd cases
-      TCall _ expr -> trace "Call rel" $ True --TODO more fine grained? 
+      TCall _ expr -> trace "Call rel" $ True --TODO more fine grained?
+      TLet _ _ s -> isRelevantStmt s
       
 
     writeIsRelevant  label =
@@ -332,6 +334,7 @@ monadRemoveStatements  targetNodes reachedNodesMap argPatLabels monadBody = trac
       (TCase expr caseExp patSeqPairs) ->
         A (getAnn expr) $ Case caseExp $ map (\(p,s) -> (p, reAssembleSeq s)) patSeqPairs
       (Task s) -> s
+      (TLet e defs s) -> A (getAnn e) $ Let defs $ reAssembleSeq s
       (TCall _ s) -> s
     
     --Add our function arguments back

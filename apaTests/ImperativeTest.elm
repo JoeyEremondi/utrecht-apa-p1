@@ -4,6 +4,20 @@ import State.Escapable (..)
 import Text (..)
 import Graphics.Element (..)
 
+controlDepTest : Int -> EState ph Int
+controlDepTest x = 
+  newRef 0 `andThen` \ref ->
+  let 
+    y = x - 1
+    z = x * 2
+  in 
+    (if z > 0
+     then writeRef ref 100
+     else writeRef ref 200
+     ) `andThen` \_ ->
+   deRef ref
+
+{-
 basicStateTest : Int -> Maybe a -> EState ph Int
 basicStateTest x y =
   (if (x <= 0)
@@ -16,7 +30,7 @@ basicStateTest x y =
     Nothing -> writeRef ref (4*newX))
       `andThen` \_ ->
   deRef ref
-{-
+
 stateFn : Int -> StateRef ph Int -> EState ph {}
 stateFn x ref =
   deRef ref `andThen` \oldVal -> 
@@ -33,6 +47,8 @@ stateFnCaller x =
 -}
 main = 
   flow down
-    [ asText <| runState <| basicStateTest 10 (Just 20)
+    [ 
+      asText <| runState <| controlDepTest -100
+      -- asText <| runState <| basicStateTest 10 (Just 20)
       --, asText <| runState <| stateFnCaller 20
     ]
